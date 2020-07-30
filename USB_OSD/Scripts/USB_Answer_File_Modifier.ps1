@@ -1,16 +1,21 @@
 <#
 脚本使用指南：
     1. 在U盘上创建一个文件夹"Windows_Installation"，并将所有需要的文件拷贝到该文件夹中；
-    2. 应答文件的名称为：
+    2. 创建应答文件，名称为：
         * BIOS: "AnswerFile_BIOS.xml"
         * UEFI: "AnswerFile_UEFI.xml"
-    3. 创建两组 <Disk wcm:action="add"> </Disk>，
-        * 第一组：Boot Partition 将在此硬盘上创建
-            * Partition 1: System Partition
-            * Partition 2: Boot Partition
-            * Partition 3: Recovery Tools Partition
-        * 第二组：此硬盘上仅创建一个 System Partition
-    4. 将 Boot Partition 放到 第一组 <Disk wcm:action="add"> </Disk> ； <CreatePartition wcm:action="add"> </CreatePartition>，Order 为"2"
+    3. BIOS的应答文件中：
+        1. 创建两组 <Disk wcm:action="add"> </Disk>，
+            * 第一组：Boot Partition 将在此硬盘上创建
+                * Partition 1: System Partition
+                * Partition 2: Boot Partition
+                * Partition 3: Recovery Tools Partition
+                * Partition 4: Data Partition
+            * 第二组：此硬盘上仅创建一个 System Partition
+        2. 将 Boot Partition 放到 第一组 <Disk wcm:action="add"> </Disk> ； <CreatePartition wcm:action="add"> </CreatePartition>，Order 为"2"
+    4. UEFI的应答文件中：
+    5. 修改本脚本的变量
+
 
 脚本基本逻辑：
     1. 确认U盘所在盘符，将其设置为变量 $ThumbDriveLetter
@@ -32,19 +37,45 @@ TODO：
     * UEFI应答文件
 #>
 
-## 为 System Partition 分配 300MB
-$SystemPartitionSizeInB = 300 * 1024 * 1024
-## 为 Recovery Tools Partition 分配 1000MB
-$RecoveryToolsPartitionSizeInB = 1000 * 1024 * 1024
-### 在配套使用的应答文件中，整块硬盘上，将 System Partition 和 Recovery Tools Partition 分配完后，剩余的所有空间都给 Boot Partition
+# MBR Disk Partition Table:
+# | Partition 1      | Partition 2    | Partition 3              | Partition 4    |
+# |------------------|----------------|--------------------------|----------------|
+# | System Partition | Boot Partition | Recovery Tools Partition | Data Partition |
 
+# UEFI Disk Partition Table:
+# | Partition 1          | Partition 2                  | Partition 3    | Partition 4              | Partition 5    |
+# |----------------------|------------------------------|----------------|--------------------------|----------------|
+# | EFI System Partition | Microsoft Reserved Partition | Boot Partition | Recovery Tools Partition | Data Partition |
+
+## 为 (EFI)System Partition 分配空间大小 (默认：300MB)
+$SystemPartitionSizeInB = 300 * 1024 * 1024
+## 【UEFI专有】为 Microsoft Reserved Partition 空间大小(默认：0)
+$MicrosoftReservedPartitionSizeInB = 0 * 1024 * 1024
+## 为 Recovery Tools Partition 分配空间大小 (默认：1000MB)
+$RecoveryToolsPartitionSizeInB = 1000 * 1024 * 1024
+## 为 Data Partition 分配空间大小 (默认：0)
+$DataPartitionSizeInB = 50 * 1024 * 1024 * 1024
+### 此变量请设置成一个大于 9GB 的值，如果 小于9GB，则不创建 Data Partition
+
+### 在配套使用的应答文件中，整块硬盘上，将 System Partition + Recovery Tools Partition + Data Partition ( + $MicrosoftReservedPartitionSizeInB) 分配完后，剩余的所有空间都给 Boot Partition
 ## 为 Boot Partition 分配的最小值为 40GB
 $BootPartitionMinSizeInB = 40 * 1024 * 1024 * 1024
-### 整块硬盘的大小应该大于 $SystemPartitionSizeInB + $RecoveryToolsPartitionSizeInB + $BootPartitionMinSizeInB
-### 如果 NVMe硬盘的大小 小于 上面三个变量之和，则不使用该 NVMe硬盘 作为 BootPartition
-$BootPartitionDiskMinSizeInB = $SystemPartitionSizeInB + $RecoveryToolsPartitionSizeInB + $BootPartitionMinSizeInB
+### 整块硬盘的大小应该大于 $SystemPartitionSizeInB ( + $MicrosoftReservedPartitionSizeInB) + $RecoveryToolsPartitionSizeInB + $DataPartitionSizeInB + $BootPartitionMinSizeInB
+### 如果 硬盘的大小 小于 上面变量之和，则不在该硬盘上部署 Boot Partition
 
-## 脚本开始
+## 准备工作
+##### >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+## 确定固件的类型
+### 此方法仅适用于 WinPE，因此在 Windows 上执行此命令会报错。From: Check if Windows 10 is using UEFI or Legacy BIOS | Tutorials https://www.tenforums.com/tutorials/85195-check-if-windows-10-using-uefi-legacy-bios.html
+$FirmwareType = '1'
+$RegistryKey = 'HKLM:\System\CurrentControlSet\Control'
+$FirmwareType = (Get-ItemProperty -Path $RegistryKey -Name PEFirmwareType).PEFirmwareType
+#### "1": BIOS（此脚本默认为 BIOS）
+#### "2": UEFI
+Write-Host "FirmwareType Comfirmed: " + $FirmwareType.toString()
+Write-Host "    1: BIOS"
+Write-Host "    2: UEFI"
 
 ## 确定U盘的盘符
 $ThumbDriveLetter = ''
@@ -75,6 +106,44 @@ Get-Disk | Export-Csv -Path $ExportCsvPath
 $AllDisks = Get-Disk | Where-Object { $_.BusType -ne "USB" } | Sort-Object -Property Size
 Write-Host "AllDisks(Except USB drive):"
 Write-Host $AllDisks
+##### <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+
+## 根据固件的类型，选择一份应答文件模板
+$TemplateAnswerFile = ""
+if ($FirmwareType -eq '2') {
+    ## UEFI
+    $TemplateAnswerFile = $ThumbDriveLetter + ":\Windows_Installation\AnswerFile_UEFI.xml"
+}
+else {
+    ## BIOS
+    $TemplateAnswerFile = $ThumbDriveLetter + ":\Windows_Installation\AnswerFile_BIOS.xml"
+
+    # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    ## 附加：处理 Microsoft Reserved Partition 的空间大小
+    $MicrosoftReservedPartitionSizeInB = 0
+    # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+}
+## 检查固件对应的应答文件模板是否存在，如果存在，则拷贝一份应答文件作为缓存
+$AnswerFileSourcePath = $LogByCommandFolder + $ScriptExecutedTime + "_AnswerFile_Exported.xml"
+if (Test-Path $TemplateAnswerFile) {
+    Copy-Item $TemplateAnswerFile -Destination $AnswerFileSourcePath
+}
+else {
+    ### 应答文件模板不存在
+    Write-Host "Answer file template not exists: " + $TemplateAnswerFile
+    Write-Host "Quit..."
+    exit
+}
+### 得到应答文件的缓存路径：$AnswerFileSourcePath
+
+
+## Data Partition 的大小 小于 9GB，则不创建 Data Partition
+if ($DataPartitionSizeInB -lt 9 * 1024 * 1024 * 1024) {
+    $DataPartitionSizeInB = 0
+}
+## 确定 Boot Partition 所在硬盘 的存储空间最小值：
+$BootPartitionDiskMinSizeInB = $SystemPartitionSizeInB + $MicrosoftReservedPartitionSizeInB + $RecoveryToolsPartitionSizeInB + $DataPartitionSizeInB + $BootPartitionMinSizeInB
 
 ## 确定 Boot Partition 的目标硬盘
 ### * BusType 为 NVMe
@@ -98,9 +167,9 @@ if ($BootPartitionDisk.Size -lt $BootPartitionDiskMinSizeInB) {
     Write-Host "Quit..."
     exit
 }
-#### 得到 Boot Partition所在硬盘的DiskID
+#### 得到 Boot Partition 所在硬盘的DiskID
 $BootPartitionDiskID = $BootPartitionDisk.Number
-#### 得到除了 Boot Partition所在硬盘、U盘 之外 的 所有其他硬盘
+#### 得到除了 Boot Partition 所在硬盘、U盘 之外 的 所有其他硬盘
 $AllDisksWOBootPartitionDisk = $AllDisks | Where-Object { $_.Number -ne $BootPartitionDiskID }
 Write-Host "AllDisksWOBootPartitionDisk:"
 Write-Host $AllDisksWOBootPartitionDisk
@@ -110,41 +179,7 @@ Write-Host $AllDisksWOBootPartitionDisk
 $BootPartitionSizeInB = $BootPartitionDisk.Size - $RecoveryToolsPartitionSizeInB - $SystemPartitionSizeInB
 $BootPartitionSizeInMB = [math]::Round($BootPartitionSizeInB / 1024 / 1024)
 
-##### >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-
-## 检查应答文件模板是否存在
-$TemplateAnswerFile = $ThumbDriveLetter + ":\Windows_Installation\AnswerFile_BIOS.xml"
-if (-not (Test-Path $TemplateAnswerFile)) {
-    ### 应答文件模板不存在
-    Write-Host "Answer file template not exists: " + $TemplateAnswerFile
-    Write-Host "Quit..."
-    exit
-}
-
-
-## 确定固件的类型
-### 此方法仅适用于 WinPE，因此在 Windows 上执行此命令会报错。From: Check if Windows 10 is using UEFI or Legacy BIOS | Tutorials https://www.tenforums.com/tutorials/85195-check-if-windows-10-using-uefi-legacy-bios.html
-$FirmwareType = '1'
-$RegistryKey = 'HKLM:\System\CurrentControlSet\Control'
-$FirmwareType = (Get-ItemProperty -Path $RegistryKey -Name PEFirmwareType).PEFirmwareType
-#### "1": BIOS（此脚本默认为 BIOS）
-#### "2": UEFI
-Write-Host "FirmwareType Comfirmed: " + $FirmwareType.toString()
-Write-Host "    1: BIOS"
-Write-Host "    2: UEFI"
-
-## 根据固件的类型，拷贝一份应答文件作为缓存
-$AnswerFileSourcePath = $LogByCommandFolder + $ScriptExecutedTime + "_AnswerFile_Exported.xml"
-if ($FirmwareType -eq '1') {
-    $TemplateAnswerFile = $ThumbDriveLetter + ":\Windows_Installation\AnswerFile_BIOS.xml"
-    Copy-Item $TemplateAnswerFile -Destination $AnswerFileSourcePath
-}
-else {
-    $TemplateAnswerFile = $ThumbDriveLetter + ":\Windows_Installation\AnswerFile_UEFI.xml"
-    Copy-Item $TemplateAnswerFile -Destination $AnswerFileSourcePath
-}
-### 得到应答文件的缓存路径：$AnswerFileSourcePath
-##### <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+#################################################################################################################
 
 ## 读取应答文件
 [xml]$AnswerFileSourceXML = Get-Content $AnswerFileSourcePath
@@ -153,16 +188,41 @@ $AnswerFileNameSpace.AddNamespace("ns", $AnswerFileSourceXML.DocumentElement.Nam
 
 ## 处理应答文件
 ### 将 $BootPartitionSizeInMB 设置到：Microsoft-Windows-Setup | DiskConfiguration | Disk[DiskID="X"] | CreatePartitions | CreatePartition[Order="2"] | Size
-#### 选中条件：
+#### 选中 Boot Partition：
 #### *  第一组 <Disk wcm:action="add"> </Disk> ，position() 为 "1"
 #### * <CreatePartition wcm:action="add"> </CreatePartition> 的 Order 为"2"
-$tempXPath = ""
-$tempXPath = "/ns:unattend/ns:settings/ns:component/ns:DiskConfiguration/ns:Disk[position()=1]/ns:CreatePartitions/ns:CreatePartition[./ns:Order=2]"
-$AnswerFileSourceXML.SelectSingleNode($tempXPath, $AnswerFileNameSpace).Size = $BootPartitionSizeInMB.toString()
+$BootPartitionXPath = "/ns:unattend/ns:settings/ns:component/ns:DiskConfiguration/ns:Disk[position()=1]/ns:CreatePartitions/ns:CreatePartition[./ns:Order=2]"
+$AnswerFileSourceXML.SelectSingleNode($BootPartitionXPath, $AnswerFileNameSpace).Size = $BootPartitionSizeInMB.toString()
 $AnswerFileSourceXML.Save($AnswerFileSourcePath)
 
+### 将 $DataPartitionSizeInB 设置到：Microsoft-Windows-Setup | DiskConfiguration | Disk[DiskID="X"] | CreatePartitions | CreatePartition[Order="4"] | Size
+#### 选中 Data Partition：
+#### *  第一组 <Disk wcm:action="add"> </Disk> ，position() 为 "1"
+#### * <CreatePartition wcm:action="add"> </CreatePartition> 的 Order 为"4"
+#### 选中 Recovery Tools Partition:
+#### *  第一组 <Disk wcm:action="add"> </Disk> ，position() 为 "1"
+#### * <CreatePartition wcm:action="add"> </CreatePartition> 的 Order 为"3"
+$DataPartitionXPath = "/ns:unattend/ns:settings/ns:component/ns:DiskConfiguration/ns:Disk[position()=1]/ns:CreatePartitions/ns:CreatePartition[./ns:Order=4]"
+$RecoveryToolsPartitionXPath = "/ns:unattend/ns:settings/ns:component/ns:DiskConfiguration/ns:Disk[position()=1]/ns:CreatePartitions/ns:CreatePartition[./ns:Order=3]"
+if ($DataPartitionSizeInB -eq 0) {
+    ### $DataPartitionSizeInB 的值为 0，不创建 Data Partition
+    $DataPartitionXMLNode = $AnswerFileSourceXML.SelectSingleNode($DataPartitionXPath, $AnswerFileNameSpace)
+    $DataPartitionXMLNode.ParentNode.RemoveChild($DataPartitionXMLNode)
+
+    ### 删除
+    $RecoveryToolsPartitionXMLNode
+
+    $AnswerFileSourceXML.Save($AnswerFileSourcePath)
+}
+else {
+    $AnswerFileSourceXML.SelectSingleNode($DataPartitionXPath, $AnswerFileNameSpace).Size = $DataPartitionSizeInB.toString()
+
+
+    $AnswerFileSourceXML.Save($AnswerFileSourcePath)
+}
+
 ### 根据硬盘数量处理
-#### 将下面这些元素添加到：Microsoft-Windows-Setup | DiskConfiguration
+#### 下面这些内容在：Microsoft-Windows-Setup | DiskConfiguration
 # <Disk wcm:action="add">
 # <CreatePartitions>
 # <CreatePartition wcm:action="add">
