@@ -170,6 +170,7 @@ if ($BootPartitionDisk.Size -lt $BootPartitionDiskMinSizeInB) {
 }
 #### 得到 Boot Partition 所在硬盘的DiskID
 $BootPartitionDiskID = $BootPartitionDisk.Number
+Write-Host "Boot Partition DiskID: $BootPartitionDiskID"
 #### 得到除了 Boot Partition 所在硬盘、U盘 之外 的 所有其他硬盘
 $AllDisksWOBootPartitionDisk = $AllDisks | Where-Object { $_.Number -ne $BootPartitionDiskID }
 Write-Host "AllDisksWOBootPartitionDisk:"
@@ -187,11 +188,11 @@ Write-Host "Recovery Tools Partition Size(MB): $RecoveryToolsPartitionSizeInMB"
 ## 确定分配给 Data Partition 的分区大小 (MB)
 $DataPartitionSizeInMB = [math]::Round($DataPartitionSizeInB / 1024 / 1024)
 Write-Host "Data Partition Size(MB): $DataPartitionSizeInMB"
-
 ## 确定分配给 Boot Partition 的分区大小 (MB)
-### 扣去 System Partition 和 Recovery Tools Partition 的分区大小，得到分配给 Boot Partition 分区的大小
-$BootPartitionSizeInB = $BootPartitionDisk.Size - $RecoveryToolsPartitionSizeInB - $SystemPartitionSizeInB
+### 扣去 System Partition、Recovery Tools Partition 的分区大小，得到分配给 Boot Partition 分区的大小
+$BootPartitionSizeInB = $BootPartitionDisk.Size - $RecoveryToolsPartitionSizeInB - $SystemPartitionSizeInB - $DataPartitionSizeInB - $MicrosoftReservedPartitionSizeInB
 $BootPartitionSizeInMB = [math]::Round($BootPartitionSizeInB / 1024 / 1024)
+Write-Host "Boot Partition Size(MB): $BootPartitionSizeInMB"
 
 #################################################################################################################
 
@@ -244,7 +245,7 @@ if ($DataPartitionSizeInB -eq 0) {
         $RecoveryToolsPartitionXMLNode.Extend = "true"
     }
     else {
-        $RecoveryToolsPartitionXMLNode.AppendChild($AnswerFileSourceXML.CreateElement("Extend", $AnswerFileNameSpace))
+        $RecoveryToolsPartitionXMLNode.AppendChild($AnswerFileSourceXML.CreateElement("Extend", $AnswerFileNameSpace)) > $null
         $RecoveryToolsPartitionXMLNode.Extend = "true"
     }
     ### Recovery Tools Partition 无 <Size>
@@ -264,7 +265,7 @@ else {
         $DataPartitionXMLNode.Extend = "true"
     }
     else {
-        $DataPartitionXMLNode.AppendChild($AnswerFileSourceXML.CreateElement("Extend", $AnswerFileSourceXML.DocumentElement.NamespaceURI))
+        $DataPartitionXMLNode.AppendChild($AnswerFileSourceXML.CreateElement("Extend", $AnswerFileSourceXML.DocumentElement.NamespaceURI)) > $null
         $DataPartitionXMLNode.Extend = "true"
     }
     ### Data Partition 无 <Size>
@@ -278,7 +279,7 @@ else {
         $RecoveryToolsPartitionXMLNode.Extend = "false"
     }
     else {
-        $RecoveryToolsPartitionXMLNode.AppendChild($AnswerFileSourceXML.CreateElement("Extend", $AnswerFileNameSpace))
+        $RecoveryToolsPartitionXMLNode.AppendChild($AnswerFileSourceXML.CreateElement("Extend", $AnswerFileNameSpace)) > $null
         $RecoveryToolsPartitionXMLNode.Extend = "false"
     }
     ### Recovery Tools Partition 有 <Size>
@@ -286,7 +287,7 @@ else {
     if ($RecoveryToolsPartitionXMLNode.Size) {
         $RecoveryToolsPartitionXMLNode.Size = $RecoveryToolsPartitionSizeInMB.toString()
     }else {
-        $DataPartitionXMLNode.AppendChild($AnswerFileSourceXML.CreateElement("Size", $AnswerFileSourceXML.DocumentElement.NamespaceURI))
+        $DataPartitionXMLNode.AppendChild($AnswerFileSourceXML.CreateElement("Size", $AnswerFileSourceXML.DocumentElement.NamespaceURI)) > $null
         $RecoveryToolsPartitionXMLNode.Size = $RecoveryToolsPartitionSizeInMB.toString()
     }
 
@@ -333,9 +334,9 @@ elseif ($AllDisksCount -eq 1) {
     Write-Host "Hard Drive count: 1 (Except USB drive)"
     ### 无脑将 Disk0 设置为 Boot Partition
     ### 将 "0" 设置到：Microsoft-Windows-Setup | ImageInstall | OSImage | InstallTo | DiskID
-    $AnswerFileSourceXML.unattend.settings.component.ImageInstall.OSImage.InstallTo.DiskID = "0"
+    $AnswerFileSourceXML.SelectSingleNode("/ns:unattend/ns:settings/ns:component/ns:ImageInstall/ns:OSImage/ns:InstallTo", $AnswerFileNameSpace).DiskID = "0"
     ### 将 "0" 设置到：Microsoft-Windows-Setup | DiskConfiguration | Disk[DiskID="X"]
-    $AnswerFileSourceXML.unattend.settings.component.DiskConfiguration.Disk[0].DiskID = "0"
+    $AnswerFileSourceXML.SelectSingleNode("/ns:unattend/ns:settings/ns:component/ns:DiskConfiguration/ns:Disk[position()=1]", $AnswerFileNameSpace).DiskID = "0"
 
     ### 基于 Position，将第二组 <Disk wcm:action="add"> </Disk> 删除
     # $tempXPath = "/ns:unattend/ns:settings/ns:component/ns:DiskConfiguration/ns:Disk[./ns:DiskID=1]"
@@ -346,11 +347,11 @@ elseif ($AllDisksCount -eq 1) {
 }
 else {
     ### 如果除U盘外，硬盘数量>1
-    Write-Host "Hard Drives count: " + $AllDisksCount + " (Except USB drive)"
+    Write-Host "Hard Drives count: $AllDisksCount (Except USB drive)"
     ### 将 $BootPartitionDiskID 设置到：Microsoft-Windows-Setup | ImageInstall | OSImage | InstallTo | DiskID
-    $AnswerFileSourceXML.unattend.settings.component.ImageInstall.OSImage.InstallTo.DiskID = $BootPartitionDiskID.toString()
+    $AnswerFileSourceXML.SelectSingleNode("/ns:unattend/ns:settings/ns:component/ns:ImageInstall/ns:OSImage/ns:InstallTo", $AnswerFileNameSpace).DiskID = $BootPartitionDiskID.toString()
     ### 将 $BootPartitionDiskID 设置到：Microsoft-Windows-Setup | DiskConfiguration | Disk[DiskID="X"]
-    $AnswerFileSourceXML.unattend.settings.component.DiskConfiguration.Disk[0].DiskID = $BootPartitionDiskID.toString()
+    $AnswerFileSourceXML.SelectSingleNode("/ns:unattend/ns:settings/ns:component/ns:DiskConfiguration/ns:Disk[position()=1]", $AnswerFileNameSpace).DiskID = $BootPartitionDiskID.toString()
 
     $tempCount = $AllDisksWOBootPartitionDisk.Number.Count
     foreach ($Disk in $AllDisksWOBootPartitionDisk) {
@@ -359,16 +360,19 @@ else {
         Write-Host "ForEach Loop:"
         Write-Host "tempCount = AllDisksWOBootPartitionDisk.Number.Count"
         Write-Host "Debug: tempCount-1 _ currentDisk.DiskID _ AllDisksWOBootPartitionDisk.Number.Count"
-        Write-Host $tempCount + "_" + $Disk.Number + "_" + $AllDisksWOBootPartitionDisk.Length
-        $AnswerFileSourceXML.unattend.settings.component.DiskConfiguration.Disk[$AllDisksWOBootPartitionDisk.Length - $tempCount].DiskID = $Disk.Number.toString()
+        Write-Host "Debug: " $tempCount "_" $Disk.Number "_" $AllDisksWOBootPartitionDisk.Number.Count
+
+        ### 从第二组 <Disk wcm:action="add"> </Disk> 开始，将 $Disk.Number 设置到：Microsoft-Windows-Setup | DiskConfiguration | Disk[DiskID="X"]
+        $order = $AllDisksWOBootPartitionDisk.Number.Count - $tempCount + 1
+        Write-Host "Order Number: $order (Start with '2')"
+        $tempXPath = "/ns:unattend/ns:settings/ns:component/ns:DiskConfiguration/ns:Disk[position()=$order]"
+        $AnswerFileSourceXML.SelectSingleNode($tempXPath, $AnswerFileNameSpace).DiskID = $Disk.Number.toString()
         if ($tempCount -gt 0) {
             ### 将第N组 <Disk wcm:action="add"> </Disk> 克隆出一组
-            $temp = $AllDisksWOBootPartitionDisk.Length - $tempCount + 1
-            Write-Host $temp
-            $tempXPath = "/ns:unattend/ns:settings/ns:component/ns:DiskConfiguration/ns:Disk[position()=$temp]"
+            Write-Host "Cloned."
             $tempNode = $AnswerFileSourceXML.SelectSingleNode($tempXPath, $AnswerFileNameSpace)
             $tempNodeCopy = $tempNode.clone()
-            $tempNode.ParentNode.AppendChild($tempNodeCopy)
+            $tempNode.ParentNode.AppendChild($tempNodeCopy) > $null
         }
     }
     $AnswerFileSourceXML.Save($AnswerFileSourcePath)
