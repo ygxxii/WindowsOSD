@@ -32,9 +32,10 @@
     5. 无论部署成功或失败，都将日志拷贝一份到U盘
 
 TODO：
-    * 日志收集
-    * 将 System Partition 部署到每一个硬盘
-    * UEFI应答文件
+    [ ] 日志收集
+    [ ] 将 System Partition 部署到每一个硬盘
+    [ ] UEFI应答文件
+    [x] 根据条件创建 Data Partition
 #>
 
 # MBR Disk Partition Table:
@@ -73,7 +74,7 @@ $RegistryKey = 'HKLM:\System\CurrentControlSet\Control'
 $FirmwareType = (Get-ItemProperty -Path $RegistryKey -Name PEFirmwareType).PEFirmwareType
 #### "1": BIOS（此脚本默认为 BIOS）
 #### "2": UEFI
-Write-Host "FirmwareType Comfirmed: " + $FirmwareType.toString()
+Write-Host "FirmwareType Comfirmed: $FirmwareType"
 Write-Host "    1: BIOS"
 Write-Host "    2: UEFI"
 
@@ -96,7 +97,7 @@ $LogByCommandFolder = $ThumbDriveLetter + ":\Windows_Installation\Logs_" + $Scri
 if (-not (Test-Path $LogByCommandFolder -PathType Container)) {
     New-Item -ItemType directory -Path $LogByCommandFolder
 }
-Write-Host "Log folder created:" + $LogByCommandFolder
+Write-Host "Log folder created: $LogByCommandFolder"
 ## 信息收集：将 Get-Disk 的输出保存到U盘
 $ExportCsvPath = $LogByCommandFolder + $ScriptExecutedTime + "_Get_Disk.csv"
 Get-Disk | Export-Csv -Path $ExportCsvPath
@@ -105,7 +106,7 @@ Get-Disk | Export-Csv -Path $ExportCsvPath
 ## 获取除U盘以外的所有硬盘信息，并按空间大小 从大到小 的顺序进行排序：
 $AllDisks = Get-Disk | Where-Object { $_.BusType -ne "USB" } | Sort-Object -Property Size
 Write-Host "AllDisks(Except USB drive):"
-Write-Host $AllDisks
+$AllDisks | Format-Table  -Property FriendlyName, Number, BootFromDisk, BusType
 ##### <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
 
@@ -172,9 +173,22 @@ $BootPartitionDiskID = $BootPartitionDisk.Number
 #### 得到除了 Boot Partition 所在硬盘、U盘 之外 的 所有其他硬盘
 $AllDisksWOBootPartitionDisk = $AllDisks | Where-Object { $_.Number -ne $BootPartitionDiskID }
 Write-Host "AllDisksWOBootPartitionDisk:"
-Write-Host $AllDisksWOBootPartitionDisk
+$AllDisksWOBootPartitionDisk | Format-Table  -Property FriendlyName, Number, BootFromDisk, BusType
 
-## 确定分配给 Boot Partition 的分区大小
+## 确定分配给 System Partition 的分区大小 (MB)
+$SystemPartitionSizeInMB = [math]::Round($SystemPartitionSizeInB / 1024 / 1024)
+Write-Host "System Partition Size(MB): $SystemPartitionSizeInMB"
+## 确定分配给 Microsoft Reserved Partition Partition 的分区大小 (MB)
+$MicrosoftReservedPartitionSizeInMB = [math]::Round($MicrosoftReservedPartitionSizeInB / 1024 / 1024)
+Write-Host "MRP Size(MB): $MicrosoftReservedPartitionSizeInMB"
+## 确定分配给 Recovery Tools Partition 的分区大小 (MB)
+$RecoveryToolsPartitionSizeInMB = [math]::Round($RecoveryToolsPartitionSizeInB / 1024 / 1024)
+Write-Host "Recovery Tools Partition Size(MB): $RecoveryToolsPartitionSizeInMB"
+## 确定分配给 Data Partition 的分区大小 (MB)
+$DataPartitionSizeInMB = [math]::Round($DataPartitionSizeInB / 1024 / 1024)
+Write-Host "Data Partition Size(MB): $DataPartitionSizeInMB"
+
+## 确定分配给 Boot Partition 的分区大小 (MB)
 ### 扣去 System Partition 和 Recovery Tools Partition 的分区大小，得到分配给 Boot Partition 分区的大小
 $BootPartitionSizeInB = $BootPartitionDisk.Size - $RecoveryToolsPartitionSizeInB - $SystemPartitionSizeInB
 $BootPartitionSizeInMB = [math]::Round($BootPartitionSizeInB / 1024 / 1024)
@@ -187,6 +201,14 @@ $AnswerFileNameSpace = New-Object System.Xml.XmlNamespaceManager $AnswerFileSour
 $AnswerFileNameSpace.AddNamespace("ns", $AnswerFileSourceXML.DocumentElement.NamespaceURI)
 
 ## 处理应答文件
+### 将 $SystmePartitionSizeInMB 设置到：Microsoft-Windows-Setup | DiskConfiguration | Disk[DiskID="X"] | CreatePartitions | CreatePartition[Order="1"] | Size
+#### 选中 System Partition：
+#### *  第一组 <Disk wcm:action="add"> </Disk> ，position() 为 "1"
+#### * <CreatePartition wcm:action="add"> </CreatePartition> 的 Order 为"1"
+$SystemPartitionXPath = "/ns:unattend/ns:settings/ns:component/ns:DiskConfiguration/ns:Disk[position()=1]/ns:CreatePartitions/ns:CreatePartition[./ns:Order=2]"
+$AnswerFileSourceXML.SelectSingleNode($SystemPartitionXPath, $AnswerFileNameSpace).Size = $SystemPartitionSizeInMB.toString()
+$AnswerFileSourceXML.Save($AnswerFileSourcePath)
+
 ### 将 $BootPartitionSizeInMB 设置到：Microsoft-Windows-Setup | DiskConfiguration | Disk[DiskID="X"] | CreatePartitions | CreatePartition[Order="2"] | Size
 #### 选中 Boot Partition：
 #### *  第一组 <Disk wcm:action="add"> </Disk> ，position() 为 "1"
@@ -195,28 +217,78 @@ $BootPartitionXPath = "/ns:unattend/ns:settings/ns:component/ns:DiskConfiguratio
 $AnswerFileSourceXML.SelectSingleNode($BootPartitionXPath, $AnswerFileNameSpace).Size = $BootPartitionSizeInMB.toString()
 $AnswerFileSourceXML.Save($AnswerFileSourcePath)
 
-### 将 $DataPartitionSizeInB 设置到：Microsoft-Windows-Setup | DiskConfiguration | Disk[DiskID="X"] | CreatePartitions | CreatePartition[Order="4"] | Size
-#### 选中 Data Partition：
-#### *  第一组 <Disk wcm:action="add"> </Disk> ，position() 为 "1"
-#### * <CreatePartition wcm:action="add"> </CreatePartition> 的 Order 为"4"
+## 根据是否创建 Data Partition 来修改 Data Partition 和 Recovery Tools Partition 的相关设置
+### 将 $RecoveryToolsPartitionSizeInB 设置到：Microsoft-Windows-Setup | DiskConfiguration | Disk[DiskID="X"] | CreatePartitions | CreatePartition[Order="3"] | Size
 #### 选中 Recovery Tools Partition:
 #### *  第一组 <Disk wcm:action="add"> </Disk> ，position() 为 "1"
 #### * <CreatePartition wcm:action="add"> </CreatePartition> 的 Order 为"3"
-$DataPartitionXPath = "/ns:unattend/ns:settings/ns:component/ns:DiskConfiguration/ns:Disk[position()=1]/ns:CreatePartitions/ns:CreatePartition[./ns:Order=4]"
 $RecoveryToolsPartitionXPath = "/ns:unattend/ns:settings/ns:component/ns:DiskConfiguration/ns:Disk[position()=1]/ns:CreatePartitions/ns:CreatePartition[./ns:Order=3]"
+$RecoveryToolsPartitionXMLNode = $AnswerFileSourceXML.SelectSingleNode($RecoveryToolsPartitionXPath, $AnswerFileNameSpace)
+#### 选中 Data Partition：
+#### *  第一组 <Disk wcm:action="add"> </Disk> ，position() 为 "1"
+#### * <CreatePartition wcm:action="add"> </CreatePartition> 的 Order 为"4"
+$DataPartitionXPath = "/ns:unattend/ns:settings/ns:component/ns:DiskConfiguration/ns:Disk[position()=1]/ns:CreatePartitions/ns:CreatePartition[./ns:Order=4]"
+$DataPartitionXMLNode = $AnswerFileSourceXML.SelectSingleNode($DataPartitionXPath, $AnswerFileNameSpace)
+#### 选中 <ModifyPartitions> 中的 Data Partition:
+$ModifyDataPartitionXPath = "/ns:unattend/ns:settings/ns:component/ns:DiskConfiguration/ns:Disk[position()=1]/ns:ModifyPartitions/ns:ModifyPartition[./ns:Order=4]"
+$ModifyDataPartitionXMLNode = $AnswerFileSourceXML.SelectSingleNode($ModifyDataPartitionXPath, $AnswerFileNameSpace)
 if ($DataPartitionSizeInB -eq 0) {
     ### $DataPartitionSizeInB 的值为 0，不创建 Data Partition
-    $DataPartitionXMLNode = $AnswerFileSourceXML.SelectSingleNode($DataPartitionXPath, $AnswerFileNameSpace)
+    Write-Host "Data Partition Creation: Do Not Create..."
+    ### 删除 Data Partition
     $DataPartitionXMLNode.ParentNode.RemoveChild($DataPartitionXMLNode)
+    $ModifyDataPartitionXMLNode.ParentNode.RemoveChild($ModifyDataPartitionXMLNode)
 
-    ### 删除
-    $RecoveryToolsPartitionXMLNode
+    ### Recovery Tools Partition 的 <Extend> 为 true
+    if ($RecoveryToolsPartitionXMLNode.Extend) {
+        $RecoveryToolsPartitionXMLNode.Extend = "true"
+    }
+    else {
+        $RecoveryToolsPartitionXMLNode.AppendChild($AnswerFileSourceXML.CreateElement("Extend", $AnswerFileNameSpace))
+        $RecoveryToolsPartitionXMLNode.Extend = "true"
+    }
+    ### Recovery Tools Partition 无 <Size>
+    if ($RecoveryToolsPartitionXMLNode.Size) {
+        $tempNode = $AnswerFileSourceXML.SelectSingleNode($($RecoveryToolsPartitionXPath + "/ns:Size"), $AnswerFileNameSpace)
+        $RecoveryToolsPartitionXMLNode.RemoveChild($tempNode)
+    }
 
     $AnswerFileSourceXML.Save($AnswerFileSourcePath)
 }
 else {
-    $AnswerFileSourceXML.SelectSingleNode($DataPartitionXPath, $AnswerFileNameSpace).Size = $DataPartitionSizeInB.toString()
+    ### 创建 Data Partition
+    Write-Host "Data Partition Creation: Created..."
 
+    ### Data Partition 的 <Extend> 为 true
+    if ($DataPartitionXMLNode.Extend) {
+        $DataPartitionXMLNode.Extend = "true"
+    }
+    else {
+        $DataPartitionXMLNode.AppendChild($AnswerFileSourceXML.CreateElement("Extend", $AnswerFileSourceXML.DocumentElement.NamespaceURI))
+        $DataPartitionXMLNode.Extend = "true"
+    }
+    ### Data Partition 无 <Size>
+    if ($DataPartitionXMLNode.Size) {
+        $tempNode = $AnswerFileSourceXML.SelectSingleNode($($DataPartitionXPath + "/ns:Size"), $AnswerFileNameSpace)
+        $DataPartitionXMLNode.RemoveChild($tempNode)
+    }
+
+    ### Recovery Tools Partition 的 <Extend> 为 false
+    if ($RecoveryToolsPartitionXMLNode.Extend) {
+        $RecoveryToolsPartitionXMLNode.Extend = "false"
+    }
+    else {
+        $RecoveryToolsPartitionXMLNode.AppendChild($AnswerFileSourceXML.CreateElement("Extend", $AnswerFileNameSpace))
+        $RecoveryToolsPartitionXMLNode.Extend = "false"
+    }
+    ### Recovery Tools Partition 有 <Size>
+    $RecoveryToolsPartitionXMLNode
+    if ($RecoveryToolsPartitionXMLNode.Size) {
+        $RecoveryToolsPartitionXMLNode.Size = $RecoveryToolsPartitionSizeInMB.toString()
+    }else {
+        $DataPartitionXMLNode.AppendChild($AnswerFileSourceXML.CreateElement("Size", $AnswerFileSourceXML.DocumentElement.NamespaceURI))
+        $RecoveryToolsPartitionXMLNode.Size = $RecoveryToolsPartitionSizeInMB.toString()
+    }
 
     $AnswerFileSourceXML.Save($AnswerFileSourcePath)
 }
@@ -258,7 +330,7 @@ if ($AllDisksCount -eq 0) {
 }
 elseif ($AllDisksCount -eq 1) {
     ### 如果除U盘外，硬盘数量=1
-    Write-Host "Hard Drive(s) count: 1 (Except USB drive)"
+    Write-Host "Hard Drive count: 1 (Except USB drive)"
     ### 无脑将 Disk0 设置为 Boot Partition
     ### 将 "0" 设置到：Microsoft-Windows-Setup | ImageInstall | OSImage | InstallTo | DiskID
     $AnswerFileSourceXML.unattend.settings.component.ImageInstall.OSImage.InstallTo.DiskID = "0"
@@ -274,7 +346,7 @@ elseif ($AllDisksCount -eq 1) {
 }
 else {
     ### 如果除U盘外，硬盘数量>1
-    Write-Host "Hard Drive(s) count: " + $AllDisksCount + " (Except USB drive)"
+    Write-Host "Hard Drives count: " + $AllDisksCount + " (Except USB drive)"
     ### 将 $BootPartitionDiskID 设置到：Microsoft-Windows-Setup | ImageInstall | OSImage | InstallTo | DiskID
     $AnswerFileSourceXML.unattend.settings.component.ImageInstall.OSImage.InstallTo.DiskID = $BootPartitionDiskID.toString()
     ### 将 $BootPartitionDiskID 设置到：Microsoft-Windows-Setup | DiskConfiguration | Disk[DiskID="X"]
@@ -303,7 +375,7 @@ else {
 }
 
 
-
+## 使用 Windows Setup 读取生成后的应答文件
 X:\Setup.exe /unattend:"$AnswerFileSourcePath"
 ### Windows Setup Command-Line Options | Microsoft Docs https://docs.microsoft.com/en-us/windows-hardware/manufacture/desktop/windows-setup-command-line-options
 
