@@ -19,14 +19,14 @@
 
 脚本基本逻辑：
     1. 确认U盘所在盘符，将其设置为变量 $ThumbDriveLetter
-    2. 读取固件的类型，将其设置为变量 $FirmwareType
-        * 从2个应答文件中选择一个
+    2. 读取固件的类型 $env:firmware_type
+        * 从2个应答文件模板中选择一个
     3. 读取磁盘信息，为 Boot Partition 选择一个硬盘（筛选条件：BusType 为 NVMe / 空间大小 最大）
         * 将该硬盘的 DiskID 设置为变量 $BootPartitionDiskID
         * 读取该硬盘的大小，给 Boot Partition 的分区大小计算出一个合理的固定值 $BootPartitionSizeInMB
         * 记录除了U盘和该硬盘外，所有其他硬盘的 DiskID $DiskArray
         * 收集日志，将 BootFromDisk 的 DiskID 记录下来
-    4. 根据 $FirmwareType 读取对应的应答文件
+    4. 根据 $env:firmware_type 读取对应的应答文件
         * 将 $BootPartitionDiskID 设置到：Microsoft-Windows-Setup | ImageInstall | OSImage | InstallTo | DiskID / PartitionID
         * 将 $BootPartitionSizeInMB 设置到：Microsoft-Windows-Setup | DiskConfiguration | Disk[DiskID="X"] | CreatePartitions | CreatePartition[Order="X"] | Size
     5. 无论部署成功或失败，都将日志拷贝一份到U盘
@@ -43,19 +43,19 @@ TODO：
 # |------------------|----------------|--------------------------|----------------|
 # | System Partition | Boot Partition | Recovery Tools Partition | Data Partition |
 
-# UEFI Disk Partition Table:
+# GPT Disk Partition Table:
 # | Partition 1          | Partition 2                  | Partition 3    | Partition 4              | Partition 5    |
 # |----------------------|------------------------------|----------------|--------------------------|----------------|
 # | EFI System Partition | Microsoft Reserved Partition | Boot Partition | Recovery Tools Partition | Data Partition |
 
 ## 为 (EFI)System Partition 分配空间大小 (默认：300MB)
 $SystemPartitionSizeInB = 300 * 1024 * 1024
-## 【UEFI专有】为 Microsoft Reserved Partition 空间大小(默认：0)
+## 【UEFI专有】为 Microsoft Reserved Partition 空间大小(默认：0MB，不创建)
 $MicrosoftReservedPartitionSizeInB = 0 * 1024 * 1024
 ## 为 Recovery Tools Partition 分配空间大小 (默认：1000MB)
 $RecoveryToolsPartitionSizeInB = 1000 * 1024 * 1024
-## 为 Data Partition 分配空间大小 (默认：0)
-$DataPartitionSizeInB = 50 * 1024 * 1024 * 1024
+## 为 Data Partition 分配空间大小 (默认：0GB，不创建)
+$DataPartitionSizeInB = 0 * 1024 * 1024 * 1024
 ### 此变量请设置成一个大于 9GB 的值，如果 小于9GB，则不创建 Data Partition
 
 ### 在配套使用的应答文件中，整块硬盘上，将 System Partition + Recovery Tools Partition + Data Partition ( + $MicrosoftReservedPartitionSizeInB) 分配完后，剩余的所有空间都给 Boot Partition
@@ -69,14 +69,10 @@ $BootPartitionMinSizeInB = 40 * 1024 * 1024 * 1024
 
 ## 确定固件的类型
 ### 此方法仅适用于 WinPE，因此在 Windows 上执行此命令会报错。From: Check if Windows 10 is using UEFI or Legacy BIOS | Tutorials https://www.tenforums.com/tutorials/85195-check-if-windows-10-using-uefi-legacy-bios.html
-$FirmwareType = '1'
-$RegistryKey = 'HKLM:\System\CurrentControlSet\Control'
-$FirmwareType = (Get-ItemProperty -Path $RegistryKey -Name PEFirmwareType).PEFirmwareType
-#### "1": BIOS（此脚本默认为 BIOS）
+# $RegistryKey = 'HKLM:\System\CurrentControlSet\Control'
+# $FirmwareType = (Get-ItemProperty -Path $RegistryKey -Name PEFirmwareType).PEFirmwareType
+#### "1": BIOS
 #### "2": UEFI
-Write-Host "FirmwareType Comfirmed: $FirmwareType"
-Write-Host "    1: BIOS"
-Write-Host "    2: UEFI"
 
 ## 确定U盘的盘符
 $ThumbDriveLetter = ''
@@ -112,11 +108,13 @@ $AllDisks | Format-Table  -Property FriendlyName, Number, BootFromDisk, BusType
 
 ## 根据固件的类型，选择一份应答文件模板
 $TemplateAnswerFile = ""
-if ($FirmwareType -eq '2') {
+if ($env:firmware_type -eq 'UEFI') {
+    Write-Host "FirmwareType Comfirmed: UEFI"
     ## UEFI
     $TemplateAnswerFile = $ThumbDriveLetter + ":\Windows_Installation\AnswerFile_UEFI.xml"
 }
 else {
+    Write-Host "FirmwareType Comfirmed: BIOS"
     ## BIOS
     $TemplateAnswerFile = $ThumbDriveLetter + ":\Windows_Installation\AnswerFile_BIOS.xml"
 
@@ -371,7 +369,7 @@ else {
             ### 将第N组 <Disk wcm:action="add"> </Disk> 克隆出一组
             Write-Host "Cloned."
             $tempNode = $AnswerFileSourceXML.SelectSingleNode($tempXPath, $AnswerFileNameSpace)
-            $tempNodeCopy = $tempNode.clone()
+            $tempNodeCopy = $tempNode.clone() > $null
             $tempNode.ParentNode.AppendChild($tempNodeCopy) > $null
         }
     }
