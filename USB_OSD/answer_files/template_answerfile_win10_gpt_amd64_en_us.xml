@@ -7,14 +7,14 @@
                 <Disk wcm:action="add">
                     <CreatePartitions>
                         <CreatePartition wcm:action="add">
-                            <Order>2</Order>
-                            <Size>128</Size>
-                            <Type>MSR</Type>
-                        </CreatePartition>
-                        <CreatePartition wcm:action="add">
                             <Order>1</Order>
                             <Size>300</Size>
                             <Type>EFI</Type>
+                        </CreatePartition>
+                        <CreatePartition wcm:action="add">
+                            <Order>2</Order>
+                            <Size>128</Size>
+                            <Type>MSR</Type>
                         </CreatePartition>
                         <CreatePartition wcm:action="add">
                             <Order>3</Order>
@@ -40,15 +40,15 @@
                             <PartitionID>1</PartitionID>
                         </ModifyPartition>
                         <ModifyPartition wcm:action="add">
+                            <PartitionID>2</PartitionID>
+                            <Order>2</Order>
+                        </ModifyPartition>
+                        <ModifyPartition wcm:action="add">
                             <Format>NTFS</Format>
                             <Label>Windows</Label>
                             <PartitionID>3</PartitionID>
                             <Order>3</Order>
                             <Letter>C</Letter>
-                        </ModifyPartition>
-                        <ModifyPartition wcm:action="add">
-                            <PartitionID>2</PartitionID>
-                            <Order>2</Order>
                         </ModifyPartition>
                         <ModifyPartition wcm:action="add">
                             <Format>NTFS</Format>

@@ -7,13 +7,13 @@
                 <Disk wcm:action="add">
                     <CreatePartitions>
                         <CreatePartition wcm:action="add">
-                            <Order>2</Order>
-                            <Size>51200</Size>
+                            <Order>1</Order>
+                            <Size>300</Size>
                             <Type>Primary</Type>
                         </CreatePartition>
                         <CreatePartition wcm:action="add">
-                            <Order>1</Order>
-                            <Size>300</Size>
+                            <Order>2</Order>
+                            <Size>51200</Size>
                             <Type>Primary</Type>
                         </CreatePartition>
                         <CreatePartition wcm:action="add">
@@ -38,18 +38,18 @@
                         </ModifyPartition>
                         <ModifyPartition wcm:action="add">
                             <Format>NTFS</Format>
-                            <Label>WinRE</Label>
-                            <PartitionID>3</PartitionID>
-                            <Order>3</Order>
-                            <TypeID>0x27</TypeID>
-                        </ModifyPartition>
-                        <ModifyPartition wcm:action="add">
-                            <Format>NTFS</Format>
                             <Label>Windows</Label>
                             <Letter>C</Letter>
                             <PartitionID>2</PartitionID>
                             <Order>2</Order>
                             <TypeID>0x07</TypeID>
+                        </ModifyPartition>
+                        <ModifyPartition wcm:action="add">
+                            <Format>NTFS</Format>
+                            <Label>WinRE</Label>
+                            <PartitionID>3</PartitionID>
+                            <Order>3</Order>
+                            <TypeID>0x27</TypeID>
                         </ModifyPartition>
                         <ModifyPartition wcm:action="add">
                             <Format>NTFS</Format>
