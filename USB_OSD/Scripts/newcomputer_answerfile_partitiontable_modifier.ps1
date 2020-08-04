@@ -10,15 +10,41 @@
   2. Check if other settings in answer file are set
   3. Generate CreatePartitions.txt file for DiskPart
 
-  MBR Disk Partition Table:
-  | Partition 1      | Partition 2    | Partition 3              | Partition 4    |
-  |------------------|----------------|--------------------------|----------------|
-  | System Partition | Boot Partition | Recovery Tools Partition | Data Partition |
+  MBR Disk Partition Table(w/ Data Partition):
+    | Partition 1      | Partition 2    | Partition 3              | Partition 4    |
+    |------------------|----------------|--------------------------|----------------|
+    | System Partition | Boot Partition | Recovery Tools Partition | Data Partition |
+    | Order=1          | Order=2        | Order=3                  | Order=4        |
+    | Type=Primary     | Type=Primary   | Type=Primary             | Type=Primary   |
+    | -                | -              | -                        | Extend=true    |
+    | Size=xxxMB       | Size=xxxMB     | Size=xxxMB               | -              |
 
-  GPT Disk Partition Table:
-  | Partition 1          | Partition 2                  | Partition 3    | Partition 4              | Partition 5    |
-  |----------------------|------------------------------|----------------|--------------------------|----------------|
-  | EFI System Partition | Microsoft Reserved Partition | Boot Partition | Recovery Tools Partition | Data Partition |
+  MBR Disk Partition Table(w/o Data Partition):
+    | Partition 1      | Partition 2    | Partition 3              |
+    |------------------|----------------|--------------------------|
+    | System Partition | Boot Partition | Recovery Tools Partition |
+    | Order=1          | Order=2        | Order=3                  |
+    | Type=Primary     | Type=Primary   | Type=Primary             |
+    | -                | -              | Extend=true              |
+    | Size=xxxMB       | Size=xxxMB     | -                        |
+
+  GPT Disk Partition Table(w/ Data Partition):
+    | Partition 1          | Partition 2                  | Partition 3    | Partition 4              | Partition 5    |
+    |----------------------|------------------------------|----------------|--------------------------|----------------|
+    | EFI System Partition | Microsoft Reserved Partition | Boot Partition | Recovery Tools Partition | Data Partition |
+    | Order=1              | Order=2                      | Order=3        | Order=4                  | Order=5        |
+    | Type=EFI             | Type=MSR                     | Type=Primary   | Type=Primary             | Type=Primary   |
+    | -                    | -                            | -              | -                        | Extend=true    |
+    | Size=xxxMB           | Size=xxxMB                   | Size=xxxMB     | Size=xxxMB               | -              |
+
+  GPT Disk Partition Table(w/o Data Partition):
+    | Partition 1          | Partition 2                  | Partition 3    | Partition 4              |
+    |----------------------|------------------------------|----------------|--------------------------|
+    | EFI System Partition | Microsoft Reserved Partition | Boot Partition | Recovery Tools Partition |
+    | Order=1              | Order=2                      | Order=3        | Order=4                  |
+    | Type=EFI             | Type=MSR                     | Type=Primary   | Type=Primary             |
+    | -                    | -                            | -              | Extend=true              |
+    | Size=xxxMB           | Size=xxxMB                   | Size=xxxMB     | -                        |
 
 .PARAMETER <Parameter_Name>
   <Brief description of parameter input required. Repeat this attribute if required>
@@ -68,7 +94,7 @@ Param (
     # Microsoft Reserved Partition size(MB, =0, >=16MB, <=128MB)
     # Microsoft Reserved Partition - Wikipedia https://en.wikipedia.org/wiki/Microsoft_Reserved_Partition
     [Parameter(Mandatory = $false)]
-    [ValidateScript( { $_ -eq 0 -or ($_ -ge 16 -and $_ -le 128) })]
+    [ValidateScript( { $_ -eq 0 -or ($_ -ge 16 -and $_ -le 128) } )]
     [int]
     $MicrosoftReservedPartitionSizeInMB=128,
 
@@ -78,9 +104,9 @@ Param (
     [int]
     $RecoveryToolsPartitionSizeInMB=1000,
 
-    # Data Partition size(MB, >=5GB)
+    # Data Partition size(MB, =0, >=5GB)
     [Parameter(Mandatory = $false)]
-    [ValidateScript({$_ -ge 5120})]
+    [ValidateScript( { $_ -eq 0 -or  $_ -ge 5120 } )]
     [int]
     $DataPartitionSizeInMB=0,
 
@@ -120,13 +146,13 @@ $TemplateMBRDiskConfiguration = @"
             <Disk wcm:action="add">
                 <CreatePartitions>
                     <CreatePartition wcm:action="add">
-                        <Order>2</Order>
-                        <Size>51200</Size>
+                        <Order>1</Order>
+                        <Size>300</Size>
                         <Type>Primary</Type>
                     </CreatePartition>
                     <CreatePartition wcm:action="add">
-                        <Order>1</Order>
-                        <Size>300</Size>
+                        <Order>2</Order>
+                        <Size>51200</Size>
                         <Type>Primary</Type>
                     </CreatePartition>
                     <CreatePartition wcm:action="add">
@@ -151,18 +177,18 @@ $TemplateMBRDiskConfiguration = @"
                     </ModifyPartition>
                     <ModifyPartition wcm:action="add">
                         <Format>NTFS</Format>
-                        <Label>WinRE</Label>
-                        <PartitionID>3</PartitionID>
-                        <Order>3</Order>
-                        <TypeID>0x27</TypeID>
-                    </ModifyPartition>
-                    <ModifyPartition wcm:action="add">
-                        <Format>NTFS</Format>
                         <Label>Windows</Label>
                         <Letter>C</Letter>
                         <PartitionID>2</PartitionID>
                         <Order>2</Order>
                         <TypeID>0x07</TypeID>
+                    </ModifyPartition>
+                    <ModifyPartition wcm:action="add">
+                        <Format>NTFS</Format>
+                        <Label>WinRE</Label>
+                        <PartitionID>3</PartitionID>
+                        <Order>3</Order>
+                        <TypeID>0x27</TypeID>
                     </ModifyPartition>
                     <ModifyPartition wcm:action="add">
                         <Format>NTFS</Format>
@@ -232,79 +258,68 @@ $TemplateGPTDiskConfiguration = @"
             <Disk wcm:action="add">
                 <CreatePartitions>
                     <CreatePartition wcm:action="add">
-                        <Order>2</Order>
-                        <Size>51200</Size>
-                        <Type>Primary</Type>
-                    </CreatePartition>
-                    <CreatePartition wcm:action="add">
                         <Order>1</Order>
                         <Size>300</Size>
-                        <Type>Primary</Type>
+                        <Type>EFI</Type>
+                    </CreatePartition>
+                    <CreatePartition wcm:action="add">
+                        <Order>2</Order>
+                        <Size>128</Size>
+                        <Type>MSR</Type>
                     </CreatePartition>
                     <CreatePartition wcm:action="add">
                         <Order>3</Order>
                         <Type>Primary</Type>
-                        <Size>1000</Size>
+                        <Size>51200</Size>
                     </CreatePartition>
                     <CreatePartition wcm:action="add">
                         <Order>4</Order>
+                        <Type>Primary</Type>
+                        <Size>1000</Size>
+                    </CreatePartition>
+                    <CreatePartition wcm:action="add">
+                        <Order>5</Order>
                         <Extend>true</Extend>
                         <Type>Primary</Type>
                     </CreatePartition>
                 </CreatePartitions>
                 <ModifyPartitions>
                     <ModifyPartition wcm:action="add">
-                        <Active>true</Active>
-                        <Format>NTFS</Format>
-                        <Label>System Reserved</Label>
+                        <Format>FAT32</Format>
+                        <Label>System</Label>
                         <Order>1</Order>
                         <PartitionID>1</PartitionID>
-                        <TypeID>0x07</TypeID>
                     </ModifyPartition>
                     <ModifyPartition wcm:action="add">
-                        <Format>NTFS</Format>
-                        <Label>WinRE</Label>
-                        <PartitionID>3</PartitionID>
-                        <Order>3</Order>
-                        <TypeID>0x27</TypeID>
+                        <PartitionID>2</PartitionID>
+                        <Order>2</Order>
                     </ModifyPartition>
                     <ModifyPartition wcm:action="add">
                         <Format>NTFS</Format>
                         <Label>Windows</Label>
+                        <PartitionID>3</PartitionID>
+                        <Order>3</Order>
                         <Letter>C</Letter>
-                        <PartitionID>2</PartitionID>
-                        <Order>2</Order>
-                        <TypeID>0x07</TypeID>
                     </ModifyPartition>
                     <ModifyPartition wcm:action="add">
                         <Format>NTFS</Format>
-                        <Label>Data</Label>
-                        <Letter>D</Letter>
+                        <Label>WinRE</Label>
                         <Order>4</Order>
                         <PartitionID>4</PartitionID>
-                        <TypeID>0x07</TypeID>
+                        <TypeID>DE94BBA4-06D1-4D40-A16A-BFD50179D6AC</TypeID>
+                    </ModifyPartition>
+                    <ModifyPartition wcm:action="add">
+                        <Order>5</Order>
+                        <PartitionID>5</PartitionID>
+                        <Format>NTFS</Format>
+                        <Label>Data</Label>
+                        <Letter>D</Letter>
                     </ModifyPartition>
                 </ModifyPartitions>
                 <DiskID>0</DiskID>
                 <WillWipeDisk>true</WillWipeDisk>
             </Disk>
             <Disk wcm:action="add">
-                <CreatePartitions>
-                    <CreatePartition wcm:action="add">
-                        <Order>1</Order>
-                        <Size>300</Size>
-                        <Type>Primary</Type>
-                    </CreatePartition>
-                </CreatePartitions>
-                <ModifyPartitions>
-                    <ModifyPartition wcm:action="add">
-                        <Active>true</Active>
-                        <Format>NTFS</Format>
-                        <Label>System</Label>
-                        <Order>1</Order>
-                        <PartitionID>1</PartitionID>
-                    </ModifyPartition>
-                </ModifyPartitions>
                 <DiskID>1</DiskID>
                 <WillWipeDisk>true</WillWipeDisk>
             </Disk>
@@ -315,23 +330,8 @@ $TemplateGPTDiskConfiguration = @"
 "@
 
 ### <ImageInstall>:
-$TemplateGPTImageInstall = @"
-<unattend xmlns="urn:schemas-microsoft-com:unattend">
-  <settings pass="windowsPE">
-    <component name="Microsoft-Windows-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-        <ImageInstall>
-            <OSImage>
-                <InstallTo>
-                    <DiskID>0</DiskID>
-                    <PartitionID>2</PartitionID>
-                </InstallTo>
-                <WillShowUI>OnError</WillShowUI>
-            </OSImage>
-        </ImageInstall>
-    </component>
-  </settings>
-</unattend>
-"@
+#### Same as MBR
+$TemplateGPTImageInstall = $TemplateMBRImageInstall
 
 # XML XPath:
 ### <DiskConfiguration>:
@@ -342,8 +342,8 @@ $TemplateImageInstallXPath = "/unattend/settings[@pass='windowsPE']/component[@n
 
 #-----------------------------------------------------------[Functions]------------------------------------------------------------
 
-# Function: Check XmlNode if exists by XPath
-function Check-XmlNode {
+# Function: Check XML node if exists by XPath
+function Find-XmlNode {
     param (
         [Parameter(Mandatory = $true)]
         [string]
@@ -394,8 +394,8 @@ function Merge-XmlFragment {
     $sourceXmlNameSpace = New-Object System.Xml.XmlNamespaceManager $sourceXml.NameTable
     $sourceXmlNameSpace.AddNamespace("ns", $sourceXml.DocumentElement.NamespaceURI)
 
-    $sourceXmlXpath = $sourceXmlXPathwoNS -replace "/", "/ns:"
     $targetXmlXpath = $targetXmlXPathwoNS -replace "/", "/ns:"
+    $sourceXmlXpath = $sourceXmlXPathwoNS -replace "/", "/ns:"
 
     $targetXmlNode = $targetXml.SelectSingleNode($targetXmlXpath, $targetXmlNameSpace)
     $sourceXmlNode = $sourceXml.SelectSingleNode($sourceXmlXpath, $sourceXmlNameSpace)
@@ -404,36 +404,53 @@ function Merge-XmlFragment {
     $targetXml.Save($targetXmlFilePath)
 }
 
+# Function: Set value to XML node
+function Set-XmlNodeValue {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]
+        $targetXmlFilePath,
+        [Parameter(Mandatory = $true)]
+        [string]
+        $targetXmlXPathwoNS,
+        [string]
+        $valueToSet
+    )
+    [xml]$targetXml = Get-Content $targetXmlFilePath
+    # Write-Output $targetXml.OuterXml
+    $targetXmlNameSpace = New-Object System.Xml.XmlNamespaceManager $targetXml.NameTable
+    $targetXmlNameSpace.AddNamespace("ns", $targetXml.DocumentElement.NamespaceURI)
 
-<#
+    $targetXmlXpath = $targetXmlXPathwoNS -replace "/", "/ns:"
 
-Function <FunctionName> {
-  Param ()
+    $targetXmlNode = $targetXml.SelectSingleNode($targetXmlXpath, $targetXmlNameSpace)
 
-  Begin {
-    Write-Host '<description of what is going on>...'
-  }
-
-  Process {
-    Try {
-      <code goes here>
-    }
-
-    Catch {
-      Write-Host -BackgroundColor Red "Error: $($_.Exception)"
-      Break
-    }
-  }
-
-  End {
-    If ($?) {
-      Write-Host 'Completed Successfully.'
-      Write-Host ' '
-    }
-  }
+    $targetXmlNode.InnerText = $valueToSet
+    $targetXml.Save($targetXmlFilePath)
 }
 
-#>
+# Function: Remve XML node  by XPath
+function Remove-XmlNode {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]
+        $targetXmlFilePath,
+        [Parameter(Mandatory = $true)]
+        [string]
+        $targetXmlXpathwoNS
+    )
+    [xml]$targetXml = Get-Content $targetXmlFilePath
+    # Write-Output $targetXml.OuterXml
+    $targetXmlNameSpace = New-Object System.Xml.XmlNamespaceManager $targetXml.NameTable
+    $targetXmlNameSpace.AddNamespace("ns", $targetXml.DocumentElement.NamespaceURI)
+
+    $targetXmlXpath = $targetXmlXpathwoNS -replace "/", "/ns:"
+    $targetXmlNode = $targetXml.SelectSingleNode($targetXmlXpath, $targetXmlNameSpace)
+
+    if ($targetXmlNode) {
+        $targetXmlNode.ParentNode.RemoveChild($targetXmlNode)
+    }
+}
 
 #-----------------------------------------------------------[Execution]------------------------------------------------------------
 
@@ -608,7 +625,7 @@ Write-Host "    Data Partition Size(MB): $DataPartitionSizeInMB" -BackgroundColo
 # Check if <settings pass="windowsPE"> <component name="Microsoft-Windows-Setup"> exists:
 # $SettingsComponentXPath = "/ns:unattend/ns:settings[@pass='windowsPE']/ns:component[@name='Microsoft-Windows-Setup']"
 $SettingsComponentXPath = "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']"
-if ($(Check-XmlNode -targetXmlFilePath $AnswerFileTargetPath -targetXmlXpathwoNS $SettingsComponentXPath)) {
+if ($(Find-XmlNode -targetXmlFilePath $AnswerFileTargetPath -targetXmlXpathwoNS $SettingsComponentXPath)) {
     Write-Host '<settings pass="windowsPE"> <component name="Microsoft-Windows-Setup"> exists !' -ForegroundColor Green
 }else {
     Write-Host '<settings pass="windowsPE"> <component name="Microsoft-Windows-Setup"> do not exists !' -ForegroundColor Green
@@ -616,7 +633,7 @@ if ($(Check-XmlNode -targetXmlFilePath $AnswerFileTargetPath -targetXmlXpathwoNS
     exit
 }
 
-# Replace <DiskConfiguration> & <ImageInstall> in the target Answer File:
+# Replace <DiskConfiguration> & <ImageInstall> with the template:
 if ($IfFirmwareTypeUEFI) {
     # UEFI
     Merge-XmlFragment -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $SettingsComponentXPath -sourceXmlXPathwoNS $TemplateDiskConfigurationXPath -sourceXMLString $TemplateGPTDiskConfiguration
@@ -627,5 +644,65 @@ if ($IfFirmwareTypeUEFI) {
     Merge-XmlFragment -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $SettingsComponentXPath -sourceXmlXPathwoNS $TemplateImageInstallXPath -sourceXMLString $TemplateMBRImageInstall
 
 }
+
+# Set (EFI) System Partition size (MB):
+if ($IfFirmwareTypeUEFI) {
+    $createPartitionOrder = "1"
+}
+else {
+    $createPartitionOrder = "1"
+}
+$createPartitionSizeXPath = "/unattend/settings/component/DiskConfiguration/Disk[position()=1]/CreatePartitions/CreatePartition[./Order=$createPartitionOrder]/Size"
+Set-XmlNodeValue -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $createPartitionSizeXPath -valueToSet $SystemPartitionSizeInMB
+
+# Set Microsoft Reserved Partition size (MB):
+if ($IfFirmwareTypeUEFI) {
+    $createPartitionOrder = "2"
+    $createPartitionSizeXPath = "/unattend/settings/component/DiskConfiguration/Disk[position()=1]/CreatePartitions/CreatePartition[./Order=$createPartitionOrder]/Size"
+    Set-XmlNodeValue -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $createPartitionSizeXPath -valueToSet $MicrosoftReservedPartitionSizeInMB
+}
+
+# Set Boot Partition size (MB):
+if ($IfFirmwareTypeUEFI) {
+    $createPartitionOrder = "3"
+}
+else {
+    $createPartitionOrder = "2"
+}
+$createPartitionSizeXPath = "/unattend/settings/component/DiskConfiguration/Disk[position()=1]/CreatePartitions/CreatePartition[./Order=$createPartitionOrder]/Size"
+Set-XmlNodeValue -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $createPartitionSizeXPath -valueToSet $BootPartitionSizeInMB
+
+# Set Recovery Tools Partition size (MB):
+if ($IfFirmwareTypeUEFI) {
+    $createPartitionOrder = "4"
+}
+else {
+    $createPartitionOrder = "3"
+}
+$createPartitionSizeXPath = "/unattend/settings/component/DiskConfiguration/Disk[position()=1]/CreatePartitions/CreatePartition[./Order=$createPartitionOrder]/Size"
+Set-XmlNodeValue -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $createPartitionSizeXPath -valueToSet $RecoveryToolsPartitionSizeInMB
+
+# Check if delete Data Paritition:
+if ($DataPartitionSizeInB -eq 0) {
+    Write-Host "Data Partition Creation: Do Not Create..."
+    # Remove Data Partition
+    if ($IfFirmwareTypeUEFI) {
+        $createPartitionOrder = "5"
+        $modifyPartitionOrder = "5"
+    }
+    else {
+        $createPartitionOrder = "4"
+        $modifyPartitionOrder = "4"
+    }
+    $createPartitionXPath = "/unattend/settings/component/DiskConfiguration/Disk[position()=1]/CreatePartitions/CreatePartition[./Order=$createPartitionOrder]"
+    $modifyPartitionXPath = "/unattend/settings/component/DiskConfiguration/Disk[position()=1]/ModifyPartitions/ModifyPartition[./Order=$modifyPartitionOrder]"
+    Remove-XmlNode -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $createPartitionXPath
+    Remove-XmlNode -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $modifyPartitionXPath
+}
+else {
+    Write-Host "Data Partition Creation: Created..."
+}
+
+
 
 
