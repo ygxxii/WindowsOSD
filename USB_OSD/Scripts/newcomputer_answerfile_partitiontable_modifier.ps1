@@ -189,6 +189,7 @@
 # TODO
 # * ParameterSetName
 # * generate a CreatePartitions.txt file for DiskPart
+# * Compare measure with Select-Xml
 
 [CmdletBinding()]
 Param (
@@ -553,6 +554,7 @@ function Set-XmlNodeValue {
         [Parameter(Mandatory = $true)]
         [string]
         $targetXmlXPathwoNS,
+        [Parameter(Mandatory = $true)]
         [string]
         $valueToSet
     )
@@ -565,18 +567,57 @@ function Set-XmlNodeValue {
 
     $targetXmlNode = $targetXml.SelectSingleNode($targetXmlXpath, $targetXmlNameSpace)
 
-    # Debug:
-    Write-Host ">>>>>>>>>>>>>>>>>>>>>>"
-    $targetXmlXpath
-    $valueToSet
-    Write-Host "<<<<<<<<<<<<<<<<<<<<<<"
-    $targetXmlNode.InnerText = $valueToSet
-    $targetXml.Save($targetXmlFilePath)
+    if ($null -eq $targetXmlNode) {
+        # Debug:
+        Write-Host "Caution: the selected node is not exist >>>>>>>>>>>>>>>>>>>>>>" -ForegroundColor Red
+        $targetXmlXpath
+        $valueToSet
+        Write-Host "         <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<" -ForegroundColor Red
+    }
+    else {
+        $targetXmlNode.InnerText = $valueToSet
+        $targetXml.Save($targetXmlFilePath)
+    }
+}
+
+# Function: Create new Element
+function New-XmlNodeElement {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]
+        $targetXmlFilePath,
+        [Parameter(Mandatory = $true)]
+        [string]
+        $targetXmlXPathwoNS,
+        [Parameter(Mandatory = $true)]
+        [string]
+        $elementToCreate
+    )
+    [xml]$targetXml = Get-Content $targetXmlFilePath
+    # Write-Output $targetXml.OuterXml
+    $targetXmlNameSpace = New-Object System.Xml.XmlNamespaceManager $targetXml.NameTable
+    $targetXmlNameSpace.AddNamespace("ns", $targetXml.DocumentElement.NamespaceURI)
+
+    $targetXmlXpath = $targetXmlXPathwoNS -replace "/", "/ns:"
+
+    $targetXmlNode = $targetXml.SelectSingleNode($targetXmlXpath, $targetXmlNameSpace)
+
+    if ($null -eq $targetXmlNode) {
+        # Debug:
+        Write-Host "Caution: the selected node is not exist >>>>>>>>>>>>>>>>>>>>>>" -ForegroundColor Red
+        $targetXmlXpath
+        $valueToSet
+        Write-Host "         <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<" -ForegroundColor Red
+    }
+    else {
+        $targetXmlNode.AppendChild($targetXml.CreateElement("$elementToCreate", $targetXml.DocumentElement.NamespaceURI)) > $null
+        $targetXml.Save($targetXmlFilePath)
+    }
 }
 
 # Function: Remve XML node by XPath
-# Example: Remove-XmlNode
-#           -targetXmlFilePath $AnswerFileTargetPath
+# Example: Remove-XmlNode \
+#           -targetXmlFilePath $AnswerFileTargetPath \
 #           -targetXmlXPathwoNS "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=1]/CreatePartitions/CreatePartition[./Order=1]"
 #           Node <CreatePartition> is removed.
 function Remove-XmlNode {
@@ -939,7 +980,7 @@ foreach ($PartitionSize in $PartitionSizeArray) {
     $modifyPartitionPosition = $tempCount.ToString()
 
     # Set <Size> in <CreatePartition>:
-    ## latest <CreatePartition> do not have <Size>:
+    ## the last <CreatePartition> do not have <Size>:
     if ($tempCount -lt $PartitionSizeArray.Count) {
         $createPartitionSizeXPath = "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=1]/CreatePartitions/CreatePartition[position()=$createPartitionPosition]/Size"
         Set-XmlNodeValue -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $createPartitionSizeXPath -valueToSet $PartitionSize.ToString()
@@ -958,6 +999,16 @@ foreach ($PartitionSize in $PartitionSizeArray) {
 
     $tempCount += 1
 }
+
+# Remove <Size> & Add <Extend> to the last <CreatePartition>:
+## Remove <Size>:
+$lastCreatePartitionSizeXPath = "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=1]/CreatePartitions/CreatePartition[last()]/Size"
+Remove-XmlNode -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $lastCreatePartitionSizeXPath
+## Add <Extend>:
+$lastCreatePartitionXPath = "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=1]/CreatePartitions/CreatePartition[last()]"
+New-XmlNodeElement -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $lastCreatePartitionXPath -elementToCreate "Extend"
+$lastCreatePartitionExtendXPath = "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=1]/CreatePartitions/CreatePartition[last()]/Extend"
+Set-XmlNodeValue -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $lastCreatePartitionExtendXPath -valueToSet "true"
 
 # Set <DiskConfiguration / Disk / DiskID>
 # Set <ImageInstall / OSImage / InstallTo / DiskID>
