@@ -1,7 +1,7 @@
 #requires -version 4
 <#
 .SYNOPSIS
-  Modify <DiskConfiguration> settings in answer file. and generate a CreatePartitions.txt file for DiskPart.
+  Modify <DiskConfiguration> settings in answer file.
 
 .DESCRIPTION
   Deployment Scenario: New Computer. All Disks on the target computer will be wiped, except USB Drive.
@@ -64,6 +64,34 @@
     | -                    | -              | Extend=true              |
     | Size=xxxMB           | Size=xxxMB     | -                        |
 
+
+    脚本使用指南：
+        1.
+
+    脚本处理逻辑：
+        1. 确定固件类型
+            * 用户使用 -FirmwareType 指定固件类型 (Legacy / UEFI)
+            * 用户未使用 -FirmwareType 指定，读取当前主机的固件类型
+        2. 获取 源应答文件
+            * 用户使用 -AnswerFilePath 指定 源应答文件 的路径
+            * 用户未使用 -AnswerFilePath 指定
+                1. 扫描文件夹：
+                    * 与脚本同一目录的文件夹
+                    * 每个分区上的一个特定文件夹 "Windows_Installation"。这个特定文件夹的名称可以用 -DriveRootFolderName 指定
+                2. 筛选出文件名符合特定规则的文件
+                    * 固件为Legacy：包含 answer，且包含 bios/mbr，以 .xml 结尾
+                    * 固件为UEFI：包含 answer，且包含 efi/gpt，以 .xml 结尾
+                3. 弹出提示，让用户使用对应顺序的数字进行选择
+                4. 如果没有扫描到与规则匹配的文件，则退出脚本
+        3. 在 源应答文件 的同一目录下，创建一个新文件夹，名称为 "源应答文件的名称 + 当前执行的时间"
+            * 将 源应答文件 拷贝一份到 新文件夹，"NewAnswerFile.xml"，作为目标应答文件
+            * 将 Get-Disk 命令的输出导出到新文件夹，"Get_Disk.csv"
+        4. 检查 除了U盘外，是否还有其他硬盘，如果没有则退出脚本
+        5. 获取 $BootPartitionDiskID
+            * 用户使用 -BootPartitionDiskID 指定 Boot Partition Disk 的 DiskID
+                * 如果指定的
+            * 用户未使用 -BootPartitionDiskID 指定，读取当前主机的所有硬盘信息
+
 .PARAMETER <Parameter_Name>
   <Brief description of parameter input required. Repeat this attribute if required>
 
@@ -83,6 +111,7 @@
 
 # TODO
 # * ParameterSetName
+# * generate a CreatePartitions.txt file for DiskPart
 
 [CmdletBinding()]
 Param (
@@ -98,10 +127,15 @@ Param (
     [string]
     $FirmwareType = $env:firmware_type,
 
-    # Specify the Boot Partition DiskID
+    # Specify the Boot Partition Disk DiskID
     [Parameter(Mandatory = $false)]
     [int]
     $BootPartitionDiskID,
+
+    # Specify the Boot Partition Disk size(B)
+    [Parameter(Mandatory = $false)]
+    [UInt64]
+    $BootPartitionDiskSizeInB,
 
     # (EFI) System Partition size(MB, >=100MB)
     [Parameter(Mandatory = $false)]
@@ -148,6 +182,17 @@ $ErrorActionPreference = 'Continue'
 $DebugPreference = 'Continue'
 
 #----------------------------------------------------------[Declarations]----------------------------------------------------------
+
+# Partitions Except BootPartition
+$SystemPartitionSizeInB = $SystemPartitionSizeInMB * 1024 * 1024
+$MicrosoftReservedPartitionSizeInB = $MicrosoftReservedPartitionSizeInMB * 1024 * 1024
+$RecoveryToolsPartitionSizeInB = $RecoveryToolsPartitionSizeInMB * 1024 * 1024
+$DataPartitionSizeInB = $DataPartitionSizeInMB * 1024 * 1024
+
+# [Boot Partition] minimum size: 40GB
+$BootPartitionMinimumSizeInB = 40 * 1024 * 1024 * 1024
+# [Boot Partition Disk] minimum size
+$BootPartitionDiskMinimumSizeInB = $SystemPartitionSizeInB + $MicrosoftReservedPartitionSizeInB + $RecoveryToolsPartitionSizeInB + $DataPartitionSizeInB + $BootPartitionMinimumSizeInB
 
 # Script excuted time
 $ScriptExecutedTime = Get-Date -UFormat "%Y_%m%d_%H%M%S"
@@ -550,33 +595,21 @@ else {
 }
 # $IfFirmwareTypeUEFI.GetType()
 
-# Partitions Except BootPartition
-$SystemPartitionSizeInB = $SystemPartitionSizeInMB * 1024 * 1024
-$MicrosoftReservedPartitionSizeInB = $MicrosoftReservedPartitionSizeInMB * 1024 * 1024
-$RecoveryToolsPartitionSizeInB = $RecoveryToolsPartitionSizeInMB * 1024 * 1024
-$DataPartitionSizeInB = $DataPartitionSizeInMB * 1024 * 1024
-
-# [Boot Partition] minimum size: 40GB
-$BootPartitionMinimumSizeInB = 40 * 1024 * 1024 * 1024
-# [Boot Partition Disk] minimum size
-$BootPartitionDiskMinimumSizeInB = $SystemPartitionSizeInB + $MicrosoftReservedPartitionSizeInB + $RecoveryToolsPartitionSizeInB + $DataPartitionSizeInB + $BootPartitionMinimumSizeInB
-
-
 ## Get valid $AnswerFilePath
 # Check if Parameter AnswerFilePath is set
 if (-not ($PSBoundParameters.ContainsKey('AnswerFilePath'))) {
     # The parameter "AnswerFilePath" is not set
     # Ask user which Answer file to be import
 
-    # Get Thumb Drive Letters
-    [System.Collections.ArrayList]$ThumbDriveLetterArray = @()
+    # Get Drive Letters
+    [System.Collections.ArrayList]$DriveLetterArray = @()
     # Get directories to check
     [System.Collections.ArrayList]$CheckFolderArray = @()
     $DriveLetters = @("A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z")
     foreach ($DriveLetter in $DriveLetters) {
         $TempPath = $DriveLetter + ":\" + $DriveRootFolderName + "\"
         if (Test-Path $TempPath -PathType 'Container') {
-            $ThumbDriveLetterArray.Add($DriveLetter) > $null
+            $DriveLetterArray.Add($DriveLetter) > $null
             $CheckFolderArray.Add($TempPath) > $null
         }
     }
@@ -589,7 +622,7 @@ if (-not ($PSBoundParameters.ContainsKey('AnswerFilePath'))) {
         foreach ($TempPath in $CheckFolderArray) {
             # The answer file must:
             # * contain "answer"
-            # * like "*xml"
+            # * like "*.xml"
             # * contain "efi" or "gpt"
             $files = Get-ChildItem $TempPath | Where-Object { $_.Name -match "answer" -and $_.Name -like "*.xml" -and ($_.Name -match "efi" -or $_.Name -match "gpt") } | Select-Object FullName
             foreach ($file in $files) {
@@ -601,7 +634,7 @@ if (-not ($PSBoundParameters.ContainsKey('AnswerFilePath'))) {
         foreach ($TempPath in $CheckFolderArray) {
             # The answer file must:
             # * contain "answer"
-            # * like "*xml"
+            # * like "*.xml"
             # * contain "bios" or "mbr"
             $files = Get-ChildItem $TempPath | Where-Object { $_.Name -match "answer" -and $_.Name -like "*.xml" -and ($_.Name -match "bios" -or $_.Name -match "mbr") } | Select-Object FullName
             foreach ($file in $files) {
@@ -658,7 +691,7 @@ Write-Host "Get-Disk output saved:" $GetDiskExportCsvPath -ForegroundColor Green
 # Read All Disks Information
 $AllDisksExceptUSB = Get-Disk | Where-Object { $_.BusType -ne "USB" } | Sort-Object -Property Size
 Write-Host "All Disks (Except USB drive):"
-$AllDisksExceptUSB | Format-Table  -Property FriendlyName, Number, BootFromDisk, BusType
+$AllDisksExceptUSB | Format-Table -Property FriendlyName, Number, BootFromDisk, BusType, Size
 
 ## --------------------------------------------------
 
@@ -671,15 +704,30 @@ if ($AllDisksExceptUSBCount -eq 0) {
     exit
 }
 
-# Get valid Boot Partition Disk
-if ($PSBoundParameters.ContainsKey('BootPartitionDiskID')) {
-    # The CmdLet parameter BootPartitionDiskID is specified
+# Get valid $BootPartitionDiskSizeInB & $BootPartitionDiskID
+if ($PSBoundParameters.ContainsKey('BootPartitionDiskID') -or $PSBoundParameters.ContainsKey('BootPartitionDiskSizeInB')) {
+    # The CmdLet parameter BootPartitionDiskID or BootPartitionDiskSizeInB is specified
 
-    # Get Boot Partition Disk
-    $BootPartitionDisk = ($AllDisksExceptUSB | Where-Object { $_.Number -eq $BootPartitionDiskID })[0]
+    if (-not ($PSBoundParameters.ContainsKey('BootPartitionDiskID'))) {
+        Write-Host "Please Specify BootPartitionDiskID & BootPartitionDiskSizeInB at same time." -ForegroundColor Green
+        Write-Host "Quit..."
+        exit
+    }
+    if (-not ($PSBoundParameters.ContainsKey('BootPartitionDiskSizeInB'))) {
+        Write-Host "Please Specify BootPartitionDiskID & BootPartitionDiskSizeInB at same time." -ForegroundColor Green
+        Write-Host "Quit..."
+        exit
+    }
+
+    $BootPartitionSizeInB = $BootPartitionDiskSizeInB - $SystemPartitionSizeInB - $MicrosoftReservedPartitionSizeInB - $RecoveryToolsPartitionSizeInB - $DataPartitionSizeInB
+    if ($BootPartitionSizeInB -lt 0) {
+        Write-Host "The specified parameter BootPartitionDiskSizeInB is NOT valid." -ForegroundColor Green
+        Write-Host "Quit..."
+        exit
+    }
 }
 else {
-    # The CmdLet parameter BootPartitionDiskID is NOT specified
+    # The CmdLet parameter BootPartitionDiskID and BootPartitionDiskSizeInB are both NOT specified
 
     $FilteredDisks = $AllDisksExceptUSB
     $AllNVMeDisks = $AllDisksExceptUSB | Where-Object { $_.BusType -eq "NVMe" } | Sort-Object -Property Size
@@ -693,27 +741,30 @@ else {
     # Get Boot Partition Disk
     $BootPartitionDisk = $FilteredDisks[0]
     if ($BootPartitionDisk.Size -lt $BootPartitionDiskMinimumSizeInB) {
-        Write-Host "All Disks did not meet the condition (SIZE)."
+        Write-Host "All Disks did not meet the condition (SIZE)." -ForegroundColor Green
         Write-Host "Quit..."
         exit
     }
     # Get $BootPartitionDiskID
     $BootPartitionDiskID = $BootPartitionDisk.Number
+
+    # Get $BootPartitionDiskSizeInB
+    $BootPartitionDiskSizeInB = $BootPartitionDisk.Size
 }
 
-Write-Host "The Boot Partition DiskID is: $BootPartitionDiskID" -ForegroundColor Green
 
-# Read disk information Except Boot Partition Disk & USB Drive
-$AllDisksExceptBPDnUSB = $AllDisksExceptUSB | Where-Object { $_.Number -ne $BootPartitionDiskID }
-Write-Host "All Disks (Except Boot Partition Disk & USB Drive):"
-$AllDisksExceptBPDnUSB | Format-Table -Property FriendlyName, Number, BootFromDisk, BusType
+###########################---------------------------
+# Requirement:
+# * $BootPartitionDiskSizeInB
+# * $BootPartitionDiskID
 
 # Get [Boot Partition Disk] size
-$BootPartitionSizeInB = $BootPartitionDisk.Size - $SystemPartitionSizeInB - $MicrosoftReservedPartitionSizeInB - $RecoveryToolsPartitionSizeInB - $DataPartitionSizeInB
+$BootPartitionSizeInB = $BootPartitionDiskSizeInB - $SystemPartitionSizeInB - $MicrosoftReservedPartitionSizeInB - $RecoveryToolsPartitionSizeInB - $DataPartitionSizeInB
 $BootPartitionSizeInMB = [math]::Round($BootPartitionSizeInB / 1024 / 1024)
 
 # Partition Size Summary:
-Write-Host "Partition Size Summary:" -ForegroundColor Red
+Write-Host "Partition Info Summary:" -ForegroundColor Red
+Write-Host "    The Boot Partition DiskID is: $BootPartitionDiskID" -ForegroundColor Green
 Write-Host "    System Partition Size(MB): $SystemPartitionSizeInMB" -BackgroundColor Yellow -ForegroundColor Red
 Write-Host "    Microsoft Reserved Partition Size(MB): $MicrosoftReservedPartitionSizeInMB" -BackgroundColor Yellow -ForegroundColor Red
 Write-Host "    Boot Partition Size(MB): $BootPartitionSizeInMB" -BackgroundColor Yellow -ForegroundColor Red
@@ -811,7 +862,7 @@ else {
     $PartitionSizeArray.Add($DataPartitionSizeInMB) > $null
 }
 
-# Verify <CreatePartition>.Count <ModifyPartition>.Count :
+# Verify <CreatePartition>.Count & <ModifyPartition>.Count :
 $createPartitionXPath = "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=1]/CreatePartitions/CreatePartition"
 $modifyPartitionXPath = "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=1]/ModifyPartitions/ModifyPartition"
 if ($PartitionSizeArray.Count -ne $(Get-XmlNodeCount -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $createPartitionXPath)) {
@@ -881,6 +932,11 @@ else {
     Set-XmlNodeValue -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $imageInstallOSImageInstallToDiskIDXPath -valueToSet $BootPartitionDiskID.ToString()
     Set-XmlNodeValue -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $imageInstallOSImageInstallToPartitionIDXPath -valueToSet $BootPartitionPartitionID.ToString()
 
+    # Read disk information Except Boot Partition Disk & USB Drive
+    $AllDisksExceptBPDnUSB = $AllDisksExceptUSB | Where-Object { $_.Number -ne $BootPartitionDiskID }
+    Write-Host "All Disks (Except Boot Partition Disk & USB Drive):"
+    $AllDisksExceptBPDnUSB | Format-Table -Property FriendlyName, Number, BootFromDisk, BusType
+
     $tempCount = $AllDisksExceptBPDnUSB.Number.Count
     foreach ($Disk in $AllDisksExceptBPDnUSB) {
         $tempCount = $tempCount - 1
@@ -898,3 +954,5 @@ else {
         }
     }
 }
+
+# X:\Setup.exe /unattend:"$AnswerFileTargetPath"
