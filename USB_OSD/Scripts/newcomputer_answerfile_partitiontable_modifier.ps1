@@ -46,6 +46,24 @@
     | -                    | -                            | -              | Extend=true              |
     | Size=xxxMB           | Size=xxxMB                   | Size=xxxMB     | -                        |
 
+  GPT Disk Partition Table(w/ Data Partition, w/o Microsoft Reserved Partition ):
+    | Partition 1          | Partition 3    | Partition 4              | Partition 5    |
+    |----------------------|----------------|--------------------------|----------------|
+    | EFI System Partition | Boot Partition | Recovery Tools Partition | Data Partition |
+    | Order=1              | Order=2        | Order=3                  | Order=4        |
+    | Type=EFI             | Type=Primary   | Type=Primary             | Type=Primary   |
+    | -                    | -              | -                        | Extend=true    |
+    | Size=xxxMB           | Size=xxxMB     | Size=xxxMB               | -              |
+
+  GPT Disk Partition Table(w/o Data Partition, w/o Microsoft Reserved Partition ):
+    | Partition 1          | Partition 3    | Partition 4              |
+    |----------------------|----------------|--------------------------|
+    | EFI System Partition | Boot Partition | Recovery Tools Partition |
+    | Order=1              | Order=2        | Order=3                  |
+    | Type=EFI             | Type=Primary   | Type=Primary             |
+    | -                    | -              | Extend=true              |
+    | Size=xxxMB           | Size=xxxMB     | -                        |
+
 .PARAMETER <Parameter_Name>
   <Brief description of parameter input required. Repeat this attribute if required>
 
@@ -339,6 +357,11 @@ $TemplateDiskConfigurationXPath = "/unattend/settings[@pass='windowsPE']/compone
 ### <ImageInstall>:
 $TemplateImageInstallXPath = "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/ImageInstall"
 
+# Partition Size Array (MB):
+[System.Collections.ArrayList]$PartitionSizeArray = @()
+
+# <ImageInstall / OSImage / InstallTo / PartitionID> = "2":
+$BootPartitionPartitionID = 2
 
 #-----------------------------------------------------------[Functions]------------------------------------------------------------
 
@@ -400,7 +423,7 @@ function Merge-XmlFragment {
     $targetXmlNode = $targetXml.SelectSingleNode($targetXmlXpath, $targetXmlNameSpace)
     $sourceXmlNode = $sourceXml.SelectSingleNode($sourceXmlXpath, $sourceXmlNameSpace)
 
-    $targetXmlNode.AppendChild($targetXml.ImportNode($sourceXmlNode, $true))
+    $targetXmlNode.AppendChild($targetXml.ImportNode($sourceXmlNode, $true)) > $null
     $targetXml.Save($targetXmlFilePath)
 }
 
@@ -425,11 +448,20 @@ function Set-XmlNodeValue {
 
     $targetXmlNode = $targetXml.SelectSingleNode($targetXmlXpath, $targetXmlNameSpace)
 
+    # Debug:
+    Write-Host ">>>>>>>>>>>>>>>>>>>>>>"
+    $targetXmlXpath
+    $valueToSet
+    Write-Host "<<<<<<<<<<<<<<<<<<<<<<"
     $targetXmlNode.InnerText = $valueToSet
     $targetXml.Save($targetXmlFilePath)
 }
 
-# Function: Remve XML node  by XPath
+# Function: Remve XML node by XPath
+# Example: Remove-XmlNode
+#           -targetXmlFilePath $AnswerFileTargetPath
+#           -targetXmlXPathwoNS "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=1]/CreatePartitions/CreatePartition[./Order=1]"
+#           Node <CreatePartition> is removed.
 function Remove-XmlNode {
     param (
         [Parameter(Mandatory = $true)]
@@ -448,8 +480,58 @@ function Remove-XmlNode {
     $targetXmlNode = $targetXml.SelectSingleNode($targetXmlXpath, $targetXmlNameSpace)
 
     if ($targetXmlNode) {
-        $targetXmlNode.ParentNode.RemoveChild($targetXmlNode)
+        $targetXmlNode.ParentNode.RemoveChild($targetXmlNode) > $null
     }
+    $targetXml.Save($targetXmlFilePath)
+}
+
+# Function: Count XML node of the same name in the same level
+# XPath:
+# "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=1]/CreatePartitions/CreatePartition[./Order=$createPartitionOrder]"
+# and
+# "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=1]/CreatePartitions/CreatePartition"
+# are different.
+function Get-XmlNodeCount {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]
+        $targetXmlFilePath,
+        [Parameter(Mandatory = $true)]
+        [string]
+        $targetXmlXpathwoNS
+    )
+    [xml]$targetXml = Get-Content $targetXmlFilePath
+    # Write-Output $targetXml.OuterXml
+    $targetXmlNameSpace = New-Object System.Xml.XmlNamespaceManager $targetXml.NameTable
+    $targetXmlNameSpace.AddNamespace("ns", $targetXml.DocumentElement.NamespaceURI)
+
+    $targetXmlXpath = $targetXmlXpathwoNS -replace "/", "/ns:"
+    $targetXmlNode = $targetXml.SelectNodes($targetXmlXpath, $targetXmlNameSpace)
+
+    return $targetXmlNode.Count
+}
+
+# Function: Clone a XML node at the same level
+function Copy-XmlNode {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]
+        $targetXmlFilePath,
+        [Parameter(Mandatory = $true)]
+        [string]
+        $targetXmlXpathwoNS
+    )
+
+    [xml]$targetXml = Get-Content $targetXmlFilePath
+    # Write-Output $targetXml.OuterXml
+    $targetXmlNameSpace = New-Object System.Xml.XmlNamespaceManager $targetXml.NameTable
+    $targetXmlNameSpace.AddNamespace("ns", $targetXml.DocumentElement.NamespaceURI)
+
+    $targetXmlXpath = $targetXmlXpathwoNS -replace "/", "/ns:"
+    $targetXmlNode = $targetXml.SelectNodes($targetXmlXpath, $targetXmlNameSpace)
+
+    $targetXmlNode.ParentNode.AppendChild($targetXmlNode.Clone()) > $null
+    $targetXml.Save($targetXmlFilePath)
 }
 
 #-----------------------------------------------------------[Execution]------------------------------------------------------------
@@ -578,9 +660,17 @@ $AllDisksExceptUSB | Format-Table  -Property FriendlyName, Number, BootFromDisk,
 
 ## --------------------------------------------------
 
+# Check if there are Hard Drives except USB Drive
+$AllDisksExceptUSBCount = $AllDisksExceptUSB.Number.Count
+if ($AllDisksExceptUSBCount -eq 0) {
+    ### There is no Hard Drives except USB Drive
+    Write-Host "Hard Drive count: No Hard Drive exists...(Except USB drive)" -ForegroundColor Red
+    Write-Host "Quit..."
+    exit
+}
+
 # Get valid Boot Partition Disk
 $FilteredDisks = $AllDisksExceptUSB
-# *
 $AllNVMeDisks = $AllDisksExceptUSB | Where-Object { $_.BusType -eq "NVMe" } | Sort-Object -Property Size
 if ($AllNVMeDisks.Number.Count -gt 0) {
     # There is more than 1 NVMe disk
@@ -601,9 +691,9 @@ $BootPartitionDiskID = $BootPartitionDisk.Number
 Write-Host "The Boot Partition DiskID is: $BootPartitionDiskID" -ForegroundColor Green
 
 # Read disk information Except Boot Partition Disk & USB Drive
-$AllDisksExceptBPDnUSB = $AllDisks | Where-Object { $_.Number -ne $BootPartitionDiskID }
-Write-Host "All Disks (Except Boot Partition & USB Drive):"
-$AllDisksExceptBPDnUSB | Format-Table  -Property FriendlyName, Number, BootFromDisk, BusType
+$AllDisksExceptBPDnUSB = $AllDisksExceptUSB | Where-Object { $_.Number -ne $BootPartitionDiskID }
+Write-Host "All Disks (Except Boot Partition Disk & USB Drive):"
+$AllDisksExceptBPDnUSB | Format-Table -Property FriendlyName, Number, BootFromDisk, BusType
 
 # Get [Boot Partition Disk] size
 $BootPartitionSizeInB = $BootPartitionDisk.Size - $SystemPartitionSizeInB - $MicrosoftReservedPartitionSizeInB - $RecoveryToolsPartitionSizeInB - $DataPartitionSizeInB
@@ -617,10 +707,7 @@ Write-Host "    Boot Partition Size(MB): $BootPartitionSizeInMB" -BackgroundColo
 Write-Host "    Recovery Tools Partition Size(MB): $RecoveryToolsPartitionSizeInMB" -BackgroundColor Yellow -ForegroundColor Red
 Write-Host "    Data Partition Size(MB): $DataPartitionSizeInMB" -BackgroundColor Yellow -ForegroundColor Red
 
-# Read the target Answer File:
-# [xml]$AnswerFileXML = Get-Content $AnswerFileTargetPath
-# $AnswerFileNameSpace = New-Object System.Xml.XmlNamespaceManager $AnswerFileXML.NameTable
-# $AnswerFileNameSpace.AddNamespace("ns", $AnswerFileXML.DocumentElement.NamespaceURI)
+# Modify the target Answer File:
 
 # Check if <settings pass="windowsPE"> <component name="Microsoft-Windows-Setup"> exists:
 # $SettingsComponentXPath = "/ns:unattend/ns:settings[@pass='windowsPE']/ns:component[@name='Microsoft-Windows-Setup']"
@@ -634,57 +721,62 @@ if ($(Find-XmlNode -targetXmlFilePath $AnswerFileTargetPath -targetXmlXpathwoNS 
 }
 
 # Replace <DiskConfiguration> & <ImageInstall> with the template:
+## Delete old node:
+## "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration"
+## "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/ImageInstall"
+## Then merge new node into:
+## "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']"
+# Delete old node :
+Remove-XmlNode -targetXmlFilePath $AnswerFileTargetPath -targetXmlXpathwoNS $TemplateDiskConfigurationXPath
+Remove-XmlNode -targetXmlFilePath $AnswerFileTargetPath -targetXmlXpathwoNS $TemplateImageInstallXPath
 if ($IfFirmwareTypeUEFI) {
     # UEFI
+    ## Merge new node:
     Merge-XmlFragment -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $SettingsComponentXPath -sourceXmlXPathwoNS $TemplateDiskConfigurationXPath -sourceXMLString $TemplateGPTDiskConfiguration
     Merge-XmlFragment -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $SettingsComponentXPath -sourceXmlXPathwoNS $TemplateImageInstallXPath -sourceXMLString $TemplateGPTImageInstall
 }else {
     # BIOS
+    ## Merge new node:
     Merge-XmlFragment -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $SettingsComponentXPath -sourceXmlXPathwoNS $TemplateDiskConfigurationXPath -sourceXMLString $TemplateMBRDiskConfiguration
     Merge-XmlFragment -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $SettingsComponentXPath -sourceXmlXPathwoNS $TemplateImageInstallXPath -sourceXMLString $TemplateMBRImageInstall
-
 }
 
-# Set (EFI) System Partition size (MB):
+# Collect System Partition Size:
+$PartitionSizeArray.Add($SystemPartitionSizeInMB) > $null
+
+# Collect Microsoft Reserved Partition Size:
+# Get valid $BootPartitionPartitionID :
+# Check if delete Microsoft Reserved Partition:
 if ($IfFirmwareTypeUEFI) {
-    $createPartitionOrder = "1"
-}
-else {
-    $createPartitionOrder = "1"
-}
-$createPartitionSizeXPath = "/unattend/settings/component/DiskConfiguration/Disk[position()=1]/CreatePartitions/CreatePartition[./Order=$createPartitionOrder]/Size"
-Set-XmlNodeValue -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $createPartitionSizeXPath -valueToSet $SystemPartitionSizeInMB
+    if ($MicrosoftReservedPartitionSizeInMB -eq 0) {
+        # Remove Microsoft Reserved Partition
+        Write-Host "Microsoft Reserved Partition Creation: Do NOT Create..." -ForegroundColor Green
+        $createPartitionOrder = "2"
+        $modifyPartitionOrder = "2"
+        $createPartitionXPath = "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=1]/CreatePartitions/CreatePartition[./Order=$createPartitionOrder]"
+        $modifyPartitionXPath = "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=1]/ModifyPartitions/ModifyPartition[./Order=$modifyPartitionOrder]"
+        Remove-XmlNode -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $createPartitionXPath
+        Remove-XmlNode -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $modifyPartitionXPath
+    }
+    else {
+        # DO NOT delete Microsoft Reserved Partition
+        Write-Host "Microsoft Reserved Partition Creation: Creating..." -ForegroundColor Green
+        $PartitionSizeArray.Add($MicrosoftReservedPartitionSizeInMB) > $null
 
-# Set Microsoft Reserved Partition size (MB):
-if ($IfFirmwareTypeUEFI) {
-    $createPartitionOrder = "2"
-    $createPartitionSizeXPath = "/unattend/settings/component/DiskConfiguration/Disk[position()=1]/CreatePartitions/CreatePartition[./Order=$createPartitionOrder]/Size"
-    Set-XmlNodeValue -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $createPartitionSizeXPath -valueToSet $MicrosoftReservedPartitionSizeInMB
+        # <ImageInstall / OSImage / InstallTo / PartitionID> = "3":
+        $BootPartitionPartitionID = 3
+    }
 }
 
-# Set Boot Partition size (MB):
-if ($IfFirmwareTypeUEFI) {
-    $createPartitionOrder = "3"
-}
-else {
-    $createPartitionOrder = "2"
-}
-$createPartitionSizeXPath = "/unattend/settings/component/DiskConfiguration/Disk[position()=1]/CreatePartitions/CreatePartition[./Order=$createPartitionOrder]/Size"
-Set-XmlNodeValue -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $createPartitionSizeXPath -valueToSet $BootPartitionSizeInMB
+# Collect Boot Partition Size:
+$PartitionSizeArray.Add($BootPartitionSizeInMB) > $null
+# Collect Recovery Tools Partition Size:
+$PartitionSizeArray.Add($RecoveryToolsPartitionSizeInMB) > $null
 
-# Set Recovery Tools Partition size (MB):
-if ($IfFirmwareTypeUEFI) {
-    $createPartitionOrder = "4"
-}
-else {
-    $createPartitionOrder = "3"
-}
-$createPartitionSizeXPath = "/unattend/settings/component/DiskConfiguration/Disk[position()=1]/CreatePartitions/CreatePartition[./Order=$createPartitionOrder]/Size"
-Set-XmlNodeValue -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $createPartitionSizeXPath -valueToSet $RecoveryToolsPartitionSizeInMB
-
+# Collect Data Partition Size:
 # Check if delete Data Paritition:
-if ($DataPartitionSizeInB -eq 0) {
-    Write-Host "Data Partition Creation: Do Not Create..."
+if ($DataPartitionSizeInMB -eq 0) {
+    Write-Host "Data Partition Creation: Do NOT Create..." -ForegroundColor Green
     # Remove Data Partition
     if ($IfFirmwareTypeUEFI) {
         $createPartitionOrder = "5"
@@ -694,15 +786,100 @@ if ($DataPartitionSizeInB -eq 0) {
         $createPartitionOrder = "4"
         $modifyPartitionOrder = "4"
     }
-    $createPartitionXPath = "/unattend/settings/component/DiskConfiguration/Disk[position()=1]/CreatePartitions/CreatePartition[./Order=$createPartitionOrder]"
-    $modifyPartitionXPath = "/unattend/settings/component/DiskConfiguration/Disk[position()=1]/ModifyPartitions/ModifyPartition[./Order=$modifyPartitionOrder]"
+    $createPartitionXPath = "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=1]/CreatePartitions/CreatePartition[./Order=$createPartitionOrder]"
+    $modifyPartitionXPath = "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=1]/ModifyPartitions/ModifyPartition[./Order=$modifyPartitionOrder]"
     Remove-XmlNode -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $createPartitionXPath
     Remove-XmlNode -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $modifyPartitionXPath
 }
 else {
-    Write-Host "Data Partition Creation: Created..."
+    Write-Host "Data Partition Creation: Creating..." -ForegroundColor Green
+    $PartitionSizeArray.Add($DataPartitionSizeInMB) > $null
 }
 
+# Verify <CreatePartition>.Count <ModifyPartition>.Count :
+$createPartitionXPath = "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=1]/CreatePartitions/CreatePartition"
+$modifyPartitionXPath = "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=1]/ModifyPartitions/ModifyPartition"
+if ($PartitionSizeArray.Count -ne $(Get-XmlNodeCount -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $createPartitionXPath)) {
+    Write-Host 'Error: $PartitionSizeArray.Count -ne <CreatePartition>.Count' -ForegroundColor Red
+    Write-Host "Quit..."
+    exit
+}
+if ($PartitionSizeArray.Count -ne $(Get-XmlNodeCount -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $modifyPartitionXPath)) {
+    Write-Host 'Error: $PartitionSizeArray.Count -ne <ModifyPartition>.Count' -ForegroundColor Red
+    Write-Host "Quit..."
+    exit
+}
 
+# ForEach Set <Size>, <Order>, <PartitionID>:
+$tempCount = 1
+foreach ($PartitionSize in $PartitionSizeArray) {
+    $createPartitionPosition = $tempCount.ToString()
+    $modifyPartitionPosition = $tempCount.ToString()
 
+    # Set <Size> in <CreatePartition>:
+    ## latest <CreatePartition> do not have <Size>:
+    if ($tempCount -lt $PartitionSizeArray.Count) {
+        $createPartitionSizeXPath = "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=1]/CreatePartitions/CreatePartition[position()=$createPartitionPosition]/Size"
+        Set-XmlNodeValue -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $createPartitionSizeXPath -valueToSet $PartitionSize.ToString()
+    }
 
+    # Set <Order> in <CreatePartition>:
+    $createPartitionOrderXPath = "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=1]/CreatePartitions/CreatePartition[position()=$createPartitionPosition]/Order"
+    # Set <Order> in <ModifyPartition>:
+    $modifyPartitionOrderXPath = "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=1]/ModifyPartitions/ModifyPartition[position()=$modifyPartitionPosition]/Order"
+    # Set <PartitionID> in <ModifyPartition>:
+    $modifyPartitionPartitionIDXPath = "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=1]/ModifyPartitions/ModifyPartition[position()=$modifyPartitionPosition]/PartitionID"
+
+    Set-XmlNodeValue -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $createPartitionOrderXPath -valueToSet $tempCount.ToString()
+    Set-XmlNodeValue -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $modifyPartitionOrderXPath -valueToSet $tempCount.ToString()
+    Set-XmlNodeValue -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $modifyPartitionPartitionIDXPath -valueToSet $tempCount.ToString()
+
+    $tempCount += 1
+}
+
+# Set <DiskConfiguration / Disk / DiskID>
+# Set <ImageInstall / OSImage / InstallTo / DiskID>
+# Set <ImageInstall / OSImage / InstallTo / PartitionID>
+$diskConfigurationDiskDiskIDXPath = "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=1]/CreatePartitions/CreatePartition[position()=$createPartitionPosition]/Order"
+$imageInstallOSImageInstallToDiskIDXPath = "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/ImageInstall/OSImage/InstallTo/DiskID"
+$imageInstallOSImageInstallToPartitionIDXPath = "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/ImageInstall/OSImage/InstallTo/PartitionID"
+# Remove <DiskConfiguration / Disk[position()=2]> if needed
+$diskConfigurationSecondDiskXPath = "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=2]"
+if ($AllDisksExceptUSBCount -eq 1) {
+    # There is only 1 drive except USB drive:
+    Write-Host "Hard Drive count: 1 (Except USB drive)"
+
+    # Set Value:
+    Set-XmlNodeValue -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $diskConfigurationDiskDiskIDXPath -valueToSet "0"
+    Set-XmlNodeValue -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $imageInstallOSImageInstallToDiskIDXPath -valueToSet "0"
+    Set-XmlNodeValue -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $imageInstallOSImageInstallToPartitionIDXPath -valueToSet $BootPartitionPartitionID.ToString()
+
+    # Remove Second Disk:
+    Remove-XmlNode -targetXmlFilePath $AnswerFileTargetPath -targetXmlXpathwoNS $diskConfigurationSecondDiskXPath
+}
+else {
+    # There are more than 1 drives except USB drive:
+    Write-Host "Hard Drives count: $AllDisksExceptUSBCount (Except USB drive)"
+
+    # Set Value:
+    Set-XmlNodeValue -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $diskConfigurationDiskDiskIDXPath -valueToSet $BootPartitionDiskID.ToString()
+    Set-XmlNodeValue -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $imageInstallOSImageInstallToDiskIDXPath -valueToSet $BootPartitionDiskID.ToString()
+    Set-XmlNodeValue -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $imageInstallOSImageInstallToPartitionIDXPath -valueToSet $BootPartitionPartitionID.ToString()
+
+    $tempCount = $AllDisksExceptBPDnUSB.Number.Count
+    foreach ($Disk in $AllDisksExceptBPDnUSB) {
+        $tempCount = $tempCount - 1
+        $order = $AllDisksExceptBPDnUSB.Number.Count - $tempCount + 1
+
+        Write-Host "Order Number: $order (Start with '2')"
+        $tempXPath = "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=$order]/DiskID"
+        Set-XmlNodeValue -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $tempXPath -valueToSet $Disk.Number.toString()
+
+        # Clone <DiskConfiguration / Disk[position()=$order]>
+        if ($tempCount -gt 0) {
+            Write-Host "Cloned: <DiskConfiguration / Disk[position()=$order]>"
+            $tempXPath = "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=$order]"
+            Copy-XmlNode -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $tempXPath
+        }
+    }
+}
