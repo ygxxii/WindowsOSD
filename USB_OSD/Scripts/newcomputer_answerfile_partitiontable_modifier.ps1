@@ -739,7 +739,7 @@ if (-not ($PSBoundParameters.ContainsKey('AnswerFilePath'))) {
             # * contain "efi" or "gpt"
             $files = Get-ChildItem $TempPath | Where-Object { $_.Name -match "answer" -and $_.Name -like "*.xml" -and ($_.Name -match "efi" -or $_.Name -match "gpt") } | Select-Object FullName
             foreach ($file in $files) {
-                $AnswerFileAbsolutePathArray.Add($file) > $null
+                $AnswerFileAbsolutePathArray.Add($file.FullName) > $null
             }
         }
     }
@@ -751,10 +751,12 @@ if (-not ($PSBoundParameters.ContainsKey('AnswerFilePath'))) {
             # * contain "bios" or "mbr"
             $files = Get-ChildItem $TempPath | Where-Object { $_.Name -match "answer" -and $_.Name -like "*.xml" -and ($_.Name -match "bios" -or $_.Name -match "mbr") } | Select-Object FullName
             foreach ($file in $files) {
-                $AnswerFileAbsolutePathArray.Add($file) > $null
+                $AnswerFileAbsolutePathArray.Add($file.FullName) > $null
             }
         }
     }
+    # Remove duplicate items
+    $AnswerFileAbsolutePathArray = @($AnswerFileAbsolutePathArray | Select-Object -Unique)
 
     if ($AnswerFileAbsolutePathArray.Count -eq 0) {
         Write-Host "There is no answer file can by imported !" -ForegroundColor Green
@@ -764,19 +766,19 @@ if (-not ($PSBoundParameters.ContainsKey('AnswerFilePath'))) {
     else {
         Write-Host "There is one or more answer files can by imported !"
         if ($AnswerFileAbsolutePathArray.Count -eq 1 -and $PSBoundParameters.ContainsKey('DriveRootFolderName')) {
-            $AnswerFilePath = $AnswerFileAbsolutePathArray[0].FullName
+            $AnswerFilePath = $AnswerFileAbsolutePathArray[0]
         }
         else {
             # Ask user which answer file to import
             Write-Host "Please select an answer file by number:" -ForegroundColor Yellow
             foreach ($AnswerFileAbsolutePath in $AnswerFileAbsolutePathArray) {
                 $index = [array]::IndexOf($AnswerFileAbsolutePathArray, $AnswerFileAbsolutePath)
-                Write-Host "    " $index "-" $AnswerFileAbsolutePath.FullName -ForegroundColor Yellow
+                Write-Host "    " $index "-" $AnswerFileAbsolutePath -ForegroundColor Yellow
             }
             [ValidateScript( { $_ -ge 0 -and $_ -lt $AnswerFileAbsolutePathArray.Count })]
             [int]$number = Read-Host "Press the number to select an answer file"
-            Write-Host "You chose:" $AnswerFileAbsolutePathArray[$number].FullName
-            $AnswerFilePath = $AnswerFileAbsolutePathArray[$number].FullName
+            Write-Host "You chose:" $AnswerFileAbsolutePathArray[$number]
+            $AnswerFilePath = $AnswerFileAbsolutePathArray[$number]
         }
     }
 }
