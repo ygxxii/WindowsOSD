@@ -84,13 +84,78 @@
                 3. 弹出提示，让用户使用对应顺序的数字进行选择
                 4. 如果没有扫描到与规则匹配的文件，则退出脚本
         3. 在 源应答文件 的同一目录下，创建一个新文件夹，名称为 "源应答文件的名称 + 当前执行的时间"
-            * 将 源应答文件 拷贝一份到 新文件夹，"NewAnswerFile.xml"，作为目标应答文件
+            * 将 源应答文件 拷贝一份到 新文件夹，"NewAnswerFile.xml"，作为【目标应答文件】
             * 将 Get-Disk 命令的输出导出到新文件夹，"Get_Disk.csv"
         4. 检查 除了U盘外，是否还有其他硬盘，如果没有则退出脚本
-        5. 获取 $BootPartitionDiskID
+        5. 计算出 Boot Partition 所在硬盘所需要的最小空间，$BootPartitionDiskMinimumSizeInB
+            $BootPartitionDiskMinimumSizeInB = $SystemPartitionSizeInB +                # System Partition 的大小                       使用 -SystemPartitionSizeInMB 指定
+                                            $MicrosoftReservedPartitionSizeInB +        # Microsoft Reserved Partition 的大小           使用 -MicrosoftReservedPartitionSizeInMB 指定
+                                            $RecoveryToolsPartitionSizeInB +            # Recovery Tools Partition 的大小               使用 -RecoveryToolsPartitionSizeInMB 指定
+                                            $DataPartitionSizeInB +                     # Data Partition 的大小                         使用 -DataPartitionSizeInMB 指定
+                                            $BootPartitionMinimumSizeInB                # Boot Partition 大小的最小值                   固定值 40GB
+        6. 获取 Boot Partition Disk，$BootPartitionDisk
             * 用户使用 -BootPartitionDiskID 指定 Boot Partition Disk 的 DiskID
-                * 如果指定的
-            * 用户未使用 -BootPartitionDiskID 指定，读取当前主机的所有硬盘信息
+                * 读取当前主机的所有硬盘信息，如果指定的 DiskID 不存在，则退出脚本
+            * 用户未使用 -BootPartitionDiskID 指定
+                1. 读取当前主机的所有硬盘信息，排除掉 U盘
+                2. 筛选出所有 NVMe硬盘，如果容量最大的 NVMe硬盘 < $BootPartitionDiskMinimumSizeInB，排除掉所有 NVMe硬盘；反之，则使用该硬盘作为 Boot Partition Disk
+                3. 筛选出所有硬盘，如果容量最大的 硬盘 < $BootPartitionDiskMinimumSizeInB，退出当前脚本；反之，则使用该硬盘作为 Boot Partition Disk
+        7. 从上面获取到 Boot Partition Disk 后，得到 Boot Partition Disk 的大小，$BootPartitionDisk.Size。可以由此计算得到 Boot Partition 的大小
+            $BootPartitionSizeInB = $BootPartitionDisk.Size -
+                                $SystemPartitionSizeInB -                               # System Partition 的大小
+                                $MicrosoftReservedPartitionSizeInB -                    # Microsoft Reserved Partition 的大小
+                                $RecoveryToolsPartitionSizeInB -                        # Recovery Tools Partition 的大小
+                                $DataPartitionSizeInB                                   # Data Partition 的大小
+        8. 开始修改上面拷贝的 目标应答文件，"NewAnswerFile.xml"
+        9. 检查目标应答文件中，是否有 "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']"。如果没有则退出脚本
+        10. 使用模板替换目标应答文件中的：
+            * "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration"
+                * BIOS：使用 $TemplateMBRDiskConfiguration 替换
+                * UEFI：使用 $TemplateGPTDiskConfiguration 替换
+            * "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/ImageInstall"
+                * BIOS：使用 $TemplateMBRImageInstall 替换
+                * UEFI：使用 $TemplateGPTImageInstall 替换
+        11. 根据情况删除 目标应答文件 中创建 Microsoft Reserved Partition 的内容
+            * BIOS：
+                * 模板中没有此分区，不需要处理
+                * $MicrosoftReservedPartitionSizeInMB 被赋值为 0
+            * UEFI：
+                * 如果 $MicrosoftReservedPartitionSizeInMB 为 0，删除掉对应的内容
+                    * "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=1]/CreatePartitions/CreatePartition[./Order=2]"
+                    * "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=1]/ModifyPartitions/ModifyPartition[./Order=2]"
+        12. 根据情况删除 目标应答文件 中创建 Data Partition 的内容
+            * 如果 $DataPartitionSizeInMB 为 0，删除掉对应的内容
+                * BIOS：
+                    * "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=1]/CreatePartitions/CreatePartition[./Order=4]"
+                    * "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=1]/ModifyPartitions/ModifyPartition[./Order=4]"
+                * UEFI：
+                    * "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=1]/CreatePartitions/CreatePartition[./Order=5]"
+                    * "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=1]/ModifyPartitions/ModifyPartition[./Order=5]"
+        13. 将各个分区的分区大小 $***PartitionSizeInMB 的值保存到数组 $PartitionSizeArray
+            * $SystemPartitionSizeInMB                  不可能为 0
+            * $MicrosoftReservedPartitionSizeInMB       可以为 0，如果为 0 则不保存到数组
+            * $RecoveryToolsPartitionSizeInMB           不可能为 0
+            * $DataPartitionSizeInMB                    可以为 0，如果为 0 则不保存到数组
+            * $BootPartitionSizeInMB                    不可能为 0
+        14. 检查数组 $PartitionSizeArray 中的元素数量 是否与以下数量相同。如果数量不相同，则退出脚本：
+            * "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=1]/CreatePartitions" 中的 <CreatePartition> 数量
+            * "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=1]/ModifyPartitions" 中的 <ModifyPartition> 数量
+        15. 轮询数组 $PartitionSizeArray，更新 目标应答文件 中的以下内容。设置每一个硬盘的 大小、部署顺序：
+            * "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=1]/CreatePartitions/CreatePartition[position()=$createPartitionPosition]/Size"
+            * "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=1]/CreatePartitions/CreatePartition[position()=$createPartitionPosition]/Order"
+            * "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=1]/ModifyPartitions/ModifyPartition[position()=$modifyPartitionPosition]/Order"
+            * "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=1]/ModifyPartitions/ModifyPartition[position()=$modifyPartitionPosition]/PartitionID"
+        16. 根据 $BootPartitionDiskID 和 $BootPartitionPartitionID，更新 目标应答文件中的以下内容：
+            * "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=1]/DiskID"
+            * "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/ImageInstall/OSImage/InstallTo/DiskID"
+            * "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/ImageInstall/OSImage/InstallTo/PartitionID"
+            > 如果除了U盘外，数量 = 1 （只有 Boot Partition Disk），无脑将 DiskID 设置为 "0"
+        17. 处理 目标应答文件 中的第二块硬盘：
+            * "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=2]"
+            > 如果除了U盘外，数量 > 1
+            > 1. 克隆第二块硬盘的内容
+            > 2. 将所有除了 Boot Partition Disk 之外的硬盘 的DiskID 轮询地设置到 "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=$position]/DiskID"
+        18. 目标应答文件处理完成
 
 .PARAMETER <Parameter_Name>
   <Brief description of parameter input required. Repeat this attribute if required>
@@ -703,13 +768,13 @@ if ($AllDisksExceptUSBCount -eq 0) {
 if ($PSBoundParameters.ContainsKey('BootPartitionDiskID')) {
     # The CmdLet parameter BootPartitionDiskID is specified
 
-    # Get Boot Partition Disk
     $temp = $AllDisksExceptUSB | Where-Object { $_.Number -eq $BootPartitionDiskID }
     if ($null -eq $temp) {
         Write-Host "The specified parameter BootPartitionDiskID is NOT valid." -ForegroundColor Green
         Write-Host "Quit..."
         exit
     }
+    # Get Boot Partition Disk
     $BootPartitionDisk = $temp[0]
 }
 else {
@@ -919,16 +984,16 @@ else {
     $tempCount = $AllDisksExceptBPDnUSB.Number.Count
     foreach ($Disk in $AllDisksExceptBPDnUSB) {
         $tempCount = $tempCount - 1
-        $order = $AllDisksExceptBPDnUSB.Number.Count - $tempCount + 1
+        $position = $AllDisksExceptBPDnUSB.Number.Count - $tempCount + 1
 
-        Write-Host "Order Number: $order (Start with '2')"
-        $tempXPath = "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=$order]/DiskID"
+        Write-Host "Position Number: $position (Start with '2')"
+        $tempXPath = "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=$position]/DiskID"
         Set-XmlNodeValue -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $tempXPath -valueToSet $Disk.Number.toString()
 
-        # Clone <DiskConfiguration / Disk[position()=$order]>
+        # Clone <DiskConfiguration / Disk[position()=$position]>
         if ($tempCount -gt 0) {
-            Write-Host "Cloned: <DiskConfiguration / Disk[position()=$order]>"
-            $tempXPath = "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=$order]"
+            Write-Host "Cloned: <DiskConfiguration / Disk[position()=$position]>"
+            $tempXPath = "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=$position]"
             Copy-XmlNode -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $tempXPath
         }
     }
