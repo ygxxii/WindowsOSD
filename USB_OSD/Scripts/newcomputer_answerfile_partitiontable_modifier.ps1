@@ -88,7 +88,7 @@
 Param (
     # file path to AnswerFile
     [Parameter(Mandatory = $false)]
-    [ValidateScript({Test-Path $_ -PathType 'Leaf'})]
+    [ValidateScript( { Test-Path $_ -PathType 'Leaf' })]
     [string]
     $AnswerFilePath,
 
@@ -96,7 +96,7 @@ Param (
     [Parameter(Mandatory = $false)]
     [ValidateSet('Legacy', 'UEFI')]
     [string]
-    $FirmwareType=$env:firmware_type,
+    $FirmwareType = $env:firmware_type,
 
     # Specify the Boot Partition DiskID
     [Parameter(Mandatory = $false)]
@@ -105,33 +105,33 @@ Param (
 
     # (EFI) System Partition size(MB, >=100MB)
     [Parameter(Mandatory = $false)]
-    [ValidateScript({$_ -ge 100})]
+    [ValidateScript( { $_ -ge 100 })]
     [int]
-    $SystemPartitionSizeInMB=300,
+    $SystemPartitionSizeInMB = 300,
 
     # Microsoft Reserved Partition size(MB, =0, >=16MB, <=128MB)
     # Microsoft Reserved Partition - Wikipedia https://en.wikipedia.org/wiki/Microsoft_Reserved_Partition
     [Parameter(Mandatory = $false)]
     [ValidateScript( { $_ -eq 0 -or ($_ -ge 16 -and $_ -le 128) } )]
     [int]
-    $MicrosoftReservedPartitionSizeInMB=128,
+    $MicrosoftReservedPartitionSizeInMB = 128,
 
     # Recovery Tools Partition size(MB, >=300MB)
     [Parameter(Mandatory = $false)]
-    [ValidateScript({$_ -ge 300})]
+    [ValidateScript( { $_ -ge 300 })]
     [int]
-    $RecoveryToolsPartitionSizeInMB=1000,
+    $RecoveryToolsPartitionSizeInMB = 1000,
 
     # Data Partition size(MB, =0, >=5GB)
     [Parameter(Mandatory = $false)]
-    [ValidateScript( { $_ -eq 0 -or  $_ -ge 5120 } )]
+    [ValidateScript( { $_ -eq 0 -or $_ -ge 5120 } )]
     [int]
-    $DataPartitionSizeInMB=0,
+    $DataPartitionSizeInMB = 0,
 
     # name of the folder under drive root
     [Parameter(Mandatory = $false)]
     [string]
-    $DriveRootFolderName="Windows_Installation"
+    $DriveRootFolderName = "Windows_Installation"
     # $DriveRootFolderName is set : do not ask user which answer file to be imported, if there is only 1 answer file is found.
 )
 
@@ -541,7 +541,8 @@ if ($FirmwareType -eq 'UEFI') {
     # the firmware type is UEFI
     Write-Host "The firmware type is: UEFI" -ForegroundColor Green
     $IfFirmwareTypeUEFI = $True
-}else {
+}
+else {
     # the firmware type is Legacy
     Write-Host "The firmware type is: Legacy" -ForegroundColor Green
     $MicrosoftReservedPartitionSizeInMB = 0
@@ -618,7 +619,8 @@ if (-not ($PSBoundParameters.ContainsKey('AnswerFilePath'))) {
         Write-Host "There is one or more answer files can by imported !"
         if ($AnswerFileAbsolutePathArray.Count -eq 1 -and $PSBoundParameters.ContainsKey('DriveRootFolderName')) {
             $AnswerFilePath = $AnswerFileAbsolutePathArray[0].FullName
-        }else{
+        }
+        else {
             # Ask user which answer file to import
             Write-Host "Please select an answer file by number:" -ForegroundColor Yellow
             foreach ($AnswerFileAbsolutePath in $AnswerFileAbsolutePathArray) {
@@ -670,24 +672,35 @@ if ($AllDisksExceptUSBCount -eq 0) {
 }
 
 # Get valid Boot Partition Disk
-$FilteredDisks = $AllDisksExceptUSB
-$AllNVMeDisks = $AllDisksExceptUSB | Where-Object { $_.BusType -eq "NVMe" } | Sort-Object -Property Size
-if ($AllNVMeDisks.Number.Count -gt 0) {
-    # There is more than 1 NVMe disk
-    if ($AllNVMeDisks[0].Size -gt $BootPartitionDiskMinimumSizeInB) {
-        # The disk with the most space in the NVMe disks >= $BootPartitionDiskMinimumSizeInB
-        $FilteredDisks = $AllNVMeDisks
-    }
+if ($PSBoundParameters.ContainsKey('BootPartitionDiskID')) {
+    # The CmdLet parameter BootPartitionDiskID is specified
+
+    # Get Boot Partition Disk
+    $BootPartitionDisk = ($AllDisksExceptUSB | Where-Object { $_.Number -eq $BootPartitionDiskID })[0]
 }
-$BootPartitionDisk = $FilteredDisks[0]
-if ($BootPartitionDisk.Size -lt $BootPartitionDiskMinimumSizeInB) {
-    Write-Host "All Disks did not meet the condition (SIZE)."
-    Write-Host "Quit..."
-    exit
+else {
+    # The CmdLet parameter BootPartitionDiskID is NOT specified
+
+    $FilteredDisks = $AllDisksExceptUSB
+    $AllNVMeDisks = $AllDisksExceptUSB | Where-Object { $_.BusType -eq "NVMe" } | Sort-Object -Property Size
+    if ($AllNVMeDisks.Number.Count -gt 0) {
+        # There is more than 1 NVMe disk
+        if ($AllNVMeDisks[0].Size -gt $BootPartitionDiskMinimumSizeInB) {
+            # The disk with the most space in the NVMe disks >= $BootPartitionDiskMinimumSizeInB
+            $FilteredDisks = $AllNVMeDisks
+        }
+    }
+    # Get Boot Partition Disk
+    $BootPartitionDisk = $FilteredDisks[0]
+    if ($BootPartitionDisk.Size -lt $BootPartitionDiskMinimumSizeInB) {
+        Write-Host "All Disks did not meet the condition (SIZE)."
+        Write-Host "Quit..."
+        exit
+    }
+    # Get $BootPartitionDiskID
+    $BootPartitionDiskID = $BootPartitionDisk.Number
 }
 
-# Get valid $BootPartitionDiskID
-$BootPartitionDiskID = $BootPartitionDisk.Number
 Write-Host "The Boot Partition DiskID is: $BootPartitionDiskID" -ForegroundColor Green
 
 # Read disk information Except Boot Partition Disk & USB Drive
@@ -714,7 +727,8 @@ Write-Host "    Data Partition Size(MB): $DataPartitionSizeInMB" -BackgroundColo
 $SettingsComponentXPath = "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']"
 if ($(Find-XmlNode -targetXmlFilePath $AnswerFileTargetPath -targetXmlXpathwoNS $SettingsComponentXPath)) {
     Write-Host '<settings pass="windowsPE"> <component name="Microsoft-Windows-Setup"> exists !' -ForegroundColor Green
-}else {
+}
+else {
     Write-Host '<settings pass="windowsPE"> <component name="Microsoft-Windows-Setup"> do not exists !' -ForegroundColor Green
     Write-Host "Quit..."
     exit
@@ -734,7 +748,8 @@ if ($IfFirmwareTypeUEFI) {
     ## Merge new node:
     Merge-XmlFragment -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $SettingsComponentXPath -sourceXmlXPathwoNS $TemplateDiskConfigurationXPath -sourceXMLString $TemplateGPTDiskConfiguration
     Merge-XmlFragment -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $SettingsComponentXPath -sourceXmlXPathwoNS $TemplateImageInstallXPath -sourceXMLString $TemplateGPTImageInstall
-}else {
+}
+else {
     # BIOS
     ## Merge new node:
     Merge-XmlFragment -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $SettingsComponentXPath -sourceXmlXPathwoNS $TemplateDiskConfigurationXPath -sourceXMLString $TemplateMBRDiskConfiguration
