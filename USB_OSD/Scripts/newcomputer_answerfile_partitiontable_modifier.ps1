@@ -132,11 +132,6 @@ Param (
     [int]
     $BootPartitionDiskID,
 
-    # Specify the Boot Partition Disk size(B)
-    [Parameter(Mandatory = $false)]
-    [UInt64]
-    $BootPartitionDiskSizeInB,
-
     # (EFI) System Partition size(MB, >=100MB)
     [Parameter(Mandatory = $false)]
     [ValidateScript( { $_ -ge 100 })]
@@ -644,7 +639,7 @@ if (-not ($PSBoundParameters.ContainsKey('AnswerFilePath'))) {
     }
 
     if ($AnswerFileAbsolutePathArray.Count -eq 0) {
-        Write-Host "There is no answer file can by imported !"
+        Write-Host "There is no answer file can by imported !" -ForegroundColor Green
         Write-Host "Quit..."
         exit
     }
@@ -691,7 +686,7 @@ Write-Host "Get-Disk output saved:" $GetDiskExportCsvPath -ForegroundColor Green
 # Read All Disks Information
 $AllDisksExceptUSB = Get-Disk | Where-Object { $_.BusType -ne "USB" } | Sort-Object -Property Size
 Write-Host "All Disks (Except USB drive):"
-$AllDisksExceptUSB | Format-Table -Property FriendlyName, Number, BootFromDisk, BusType, Size
+$AllDisksExceptUSB | Format-Table -Property FriendlyName, Number, BootFromDisk, BusType
 
 ## --------------------------------------------------
 
@@ -699,35 +694,26 @@ $AllDisksExceptUSB | Format-Table -Property FriendlyName, Number, BootFromDisk, 
 $AllDisksExceptUSBCount = $AllDisksExceptUSB.Number.Count
 if ($AllDisksExceptUSBCount -eq 0) {
     ### There is no Hard Drives except USB Drive
-    Write-Host "Hard Drive count: No Hard Drive exists...(Except USB drive)" -ForegroundColor Red
+    Write-Host "Hard Drive count: No Hard Drive exists...(Except USB drive)" -ForegroundColor Green
     Write-Host "Quit..."
     exit
 }
 
-# Get valid $BootPartitionDiskSizeInB & $BootPartitionDiskID
-if ($PSBoundParameters.ContainsKey('BootPartitionDiskID') -or $PSBoundParameters.ContainsKey('BootPartitionDiskSizeInB')) {
-    # The CmdLet parameter BootPartitionDiskID or BootPartitionDiskSizeInB is specified
+# Get valid Boot Partition Disk
+if ($PSBoundParameters.ContainsKey('BootPartitionDiskID')) {
+    # The CmdLet parameter BootPartitionDiskID is specified
 
-    if (-not ($PSBoundParameters.ContainsKey('BootPartitionDiskID'))) {
-        Write-Host "Please Specify BootPartitionDiskID & BootPartitionDiskSizeInB at same time." -ForegroundColor Green
+    # Get Boot Partition Disk
+    $temp = $AllDisksExceptUSB | Where-Object { $_.Number -eq $BootPartitionDiskID }
+    if ($null -eq $temp) {
+        Write-Host "The specified parameter BootPartitionDiskID is NOT valid." -ForegroundColor Green
         Write-Host "Quit..."
         exit
     }
-    if (-not ($PSBoundParameters.ContainsKey('BootPartitionDiskSizeInB'))) {
-        Write-Host "Please Specify BootPartitionDiskID & BootPartitionDiskSizeInB at same time." -ForegroundColor Green
-        Write-Host "Quit..."
-        exit
-    }
-
-    $BootPartitionSizeInB = $BootPartitionDiskSizeInB - $SystemPartitionSizeInB - $MicrosoftReservedPartitionSizeInB - $RecoveryToolsPartitionSizeInB - $DataPartitionSizeInB
-    if ($BootPartitionSizeInB -lt 0) {
-        Write-Host "The specified parameter BootPartitionDiskSizeInB is NOT valid." -ForegroundColor Green
-        Write-Host "Quit..."
-        exit
-    }
+    $BootPartitionDisk = $temp[0]
 }
 else {
-    # The CmdLet parameter BootPartitionDiskID and BootPartitionDiskSizeInB are both NOT specified
+    # The CmdLet parameter BootPartitionDiskID is NOT specified
 
     $FilteredDisks = $AllDisksExceptUSB
     $AllNVMeDisks = $AllDisksExceptUSB | Where-Object { $_.BusType -eq "NVMe" } | Sort-Object -Property Size
@@ -747,19 +733,12 @@ else {
     }
     # Get $BootPartitionDiskID
     $BootPartitionDiskID = $BootPartitionDisk.Number
-
-    # Get $BootPartitionDiskSizeInB
-    $BootPartitionDiskSizeInB = $BootPartitionDisk.Size
 }
 
 
-###########################---------------------------
-# Requirement:
-# * $BootPartitionDiskSizeInB
-# * $BootPartitionDiskID
 
 # Get [Boot Partition Disk] size
-$BootPartitionSizeInB = $BootPartitionDiskSizeInB - $SystemPartitionSizeInB - $MicrosoftReservedPartitionSizeInB - $RecoveryToolsPartitionSizeInB - $DataPartitionSizeInB
+$BootPartitionSizeInB = $BootPartitionDisk.Size - $SystemPartitionSizeInB - $MicrosoftReservedPartitionSizeInB - $RecoveryToolsPartitionSizeInB - $DataPartitionSizeInB
 $BootPartitionSizeInMB = [math]::Round($BootPartitionSizeInB / 1024 / 1024)
 
 # Partition Size Summary:
@@ -866,12 +845,12 @@ else {
 $createPartitionXPath = "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=1]/CreatePartitions/CreatePartition"
 $modifyPartitionXPath = "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=1]/ModifyPartitions/ModifyPartition"
 if ($PartitionSizeArray.Count -ne $(Get-XmlNodeCount -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $createPartitionXPath)) {
-    Write-Host 'Error: $PartitionSizeArray.Count -ne <CreatePartition>.Count' -ForegroundColor Red
+    Write-Host 'Error: $PartitionSizeArray.Count -ne <CreatePartition>.Count' -ForegroundColor Green
     Write-Host "Quit..."
     exit
 }
 if ($PartitionSizeArray.Count -ne $(Get-XmlNodeCount -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $modifyPartitionXPath)) {
-    Write-Host 'Error: $PartitionSizeArray.Count -ne <ModifyPartition>.Count' -ForegroundColor Red
+    Write-Host 'Error: $PartitionSizeArray.Count -ne <ModifyPartition>.Count' -ForegroundColor Green
     Write-Host "Quit..."
     exit
 }
@@ -906,7 +885,7 @@ foreach ($PartitionSize in $PartitionSizeArray) {
 # Set <DiskConfiguration / Disk / DiskID>
 # Set <ImageInstall / OSImage / InstallTo / DiskID>
 # Set <ImageInstall / OSImage / InstallTo / PartitionID>
-$diskConfigurationDiskDiskIDXPath = "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=1]/CreatePartitions/CreatePartition[position()=$createPartitionPosition]/Order"
+$diskConfigurationDiskDiskIDXPath = "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=1]/DiskID"
 $imageInstallOSImageInstallToDiskIDXPath = "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/ImageInstall/OSImage/InstallTo/DiskID"
 $imageInstallOSImageInstallToPartitionIDXPath = "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/ImageInstall/OSImage/InstallTo/PartitionID"
 # Remove <DiskConfiguration / Disk[position()=2]> if needed
