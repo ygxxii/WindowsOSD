@@ -66,7 +66,19 @@
 
 
     脚本使用指南：
-        1.
+        1. 自动扫描特定的文件夹：
+            a. 在 硬盘/U盘 根目录下创建一个目录 "Windows_Installation"
+            b. 将 源应答文件 复制到 "Windows_Installation"，并重命名，命名规则：
+                * 固件为Legacy：包含 "answer"，且包含 "bios" / "mbr"，以 .xml 结尾
+                * 固件为UEFI：包含 "answer"，且包含 "efi" / "gpt"，以 .xml 结尾
+            c. 执行脚本
+                ```
+                ./XXXXX.ps1
+                ```
+        2. 指定 源应答文件，执行脚本：
+            ```
+            ./XXXXX.ps1 -AnswerFilePath "myAutounattend.xml"
+            ```
 
     脚本处理逻辑：
         1. 确定固件类型
