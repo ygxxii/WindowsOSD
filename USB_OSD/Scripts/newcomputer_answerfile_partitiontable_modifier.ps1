@@ -66,6 +66,15 @@
     | -                    | -              | Extend=true              |
     | Size=xxxMB           | Size=xxxMB     | -                        |
 
+    脚本功能：
+        读取一个应答文件，然后从该应答文件生成一个新的应答文件。
+
+    注意 ！！！！：
+    1. 此脚本只有一个功能：修改应答文件中的内容。且仅仅是根据【当前主机】的硬盘信息修改应答文件中的以下部分：
+        * "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/"
+        * "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/ImageInstall"
+    2. 使用新生成的应答文件部署 Windows 时，目标主机上 所有硬盘（除U盘以外）的数据均会丢失
+    3. 当前主机的固件类型为 UEFI 时，如果指定选项 "-FirmwareType Legacy"，会部署失败；反之亦然
 
     脚本使用指南：
         1. 自动扫描特定的文件夹：
@@ -81,12 +90,23 @@
             ```
             ./XXXXX.ps1 -AnswerFilePath "myAutounattend.xml"
             ```
+        3. 脚本选项：
+            * "AnswerFilePath"：指定要使用的应答文件
+            * "-FirmwareType"：指定固件类型 (UEFI / Legacy)
+                * "-FirmwareType Legacy"：      目标主机上的所有硬盘都将使用 MBR
+                * "-FirmwareType UEFI"：        目标主机上的所有硬盘都将使用 GPT
+            * "-SystemPartitionSizeInMB"：指定 System Partition 的分区大小，默认为
+            * "-MicrosoftReservedPartitionSizeInMB"：指定 Partition 的分区大小，默认为
+            * "-RecoveryToolsPartitionSizeInMB"：指定 Partition 的分区大小，默认为
+            * "-DataPartitionSizeInMB"：指定 Partition 的分区大小，默认为
 
-    注意 ！！！！：
-        1. 此脚本只有一个功能：修改应答文件中的内容。且仅仅是根据【当前主机】的硬盘信息修改应答文件中的以下部分：
-            * "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/"
-            * "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/ImageInstall"
-        2. 使用新生成的应答文件部署 Windows 时，目标主机上 所有硬盘（除U盘以外）的数据均会丢失
+    已考虑的部署环境：
+        A. 全新安装 Windows，目标主机上只有一块硬盘
+        B. 全新安装 Windows，目标主机上有多块硬盘
+
+    未考虑的部署环境（举例）：
+        A. 已部署旧 Windows，仅覆盖安装旧 Windows，不删除其他硬盘数据
+        B. 用户手动指定 Windows 部署的目标硬盘，不删除其他硬盘数据
 
     脚本处理逻辑：
         1. 确定固件类型
@@ -190,17 +210,17 @@
   Purpose/Change: Initial script development
 
 .EXAMPLE
-  ./answer_file_Partition_table_modifier.ps1 -AnswerFilePath "myAutounattend.xml"
-
-
-#>
-
-#---------------------------------------------------------[Script Parameters]------------------------------------------------------
+  ./newcomputer_answerfile_partitiontable_modifier.ps1 -AnswerFilePath "myAutounattend.xml"
 
 # TODO
 # * ParameterSetName
 # * generate a CreatePartitions.txt file for DiskPart
 # * Compare measure with Select-Xml
+# * GPT disks except Boot Partition Disk : Create Partitions
+
+#>
+
+#---------------------------------------------------------[Script Parameters]------------------------------------------------------
 
 [CmdletBinding()]
 Param (
@@ -592,6 +612,12 @@ function Set-XmlNodeValue {
 }
 
 # Function: Create new Element
+# Example: New-XmlNodeElement \
+#           -targetXmlFilePath $AnswerFileTargetPath \
+#           -targetXmlXPathwoNS "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=1]/CreatePartitions/CreatePartition[last()]" \
+#           -elementToCreate "Extend"
+#           a new child Node <Extend> is created under <CreatePartition>
+# Caution: You can create the same node even if they are on the same level.
 function New-XmlNodeElement {
     param (
         [Parameter(Mandatory = $true)]
@@ -807,7 +833,7 @@ Write-Host "The source answer file path is:" $AnswerFilePath -ForegroundColor Gr
 # Create Folder to contain new Answer file
 $AnswerFileBaseName = (Get-Item $AnswerFilePath).BaseName
 $AnswerFileDirectoryName = (Get-Item $AnswerFilePath).DirectoryName
-$NewContainer = $AnswerFileDirectoryName + "\" + $AnswerFileBaseName + " - " + $ScriptExecutedTime + "\"
+$NewContainer = $AnswerFileDirectoryName + "\" + $ScriptExecutedTime + "-" + $AnswerFileBaseName + "\"
 if (-not (Test-Path $NewContainer -PathType Container)) {
     New-Item -ItemType directory -Path $NewContainer > $null
 }
@@ -1021,8 +1047,10 @@ $lastCreatePartitionSizeXPath = "/unattend/settings[@pass='windowsPE']/component
 Remove-XmlNode -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $lastCreatePartitionSizeXPath
 ## Add <Extend>:
 $lastCreatePartitionXPath = "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=1]/CreatePartitions/CreatePartition[last()]"
-New-XmlNodeElement -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $lastCreatePartitionXPath -elementToCreate "Extend"
 $lastCreatePartitionExtendXPath = "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=1]/CreatePartitions/CreatePartition[last()]/Extend"
+if (-not (Find-XmlNode -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $lastCreatePartitionExtendXPath)) {
+    New-XmlNodeElement -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $lastCreatePartitionXPath -elementToCreate "Extend"
+}
 Set-XmlNodeValue -targetXmlFilePath $AnswerFileTargetPath -targetXmlXPathwoNS $lastCreatePartitionExtendXPath -valueToSet "true"
 
 # Set <DiskConfiguration / Disk / DiskID>
