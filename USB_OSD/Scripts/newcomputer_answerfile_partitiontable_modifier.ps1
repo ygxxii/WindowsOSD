@@ -10,7 +10,9 @@
   2. Check if other settings in answer file are set
   3. Generate CreatePartitions.txt file for DiskPart
 
-  MBR Disk Partition Table(w/ Data Partition):
+  Boot Partition Disk - Partition Tables:
+
+    MBR Disk Partition Table(w/ Data Partition):
     | Partition 1      | Partition 2    | Partition 3              | Partition 4    |
     |------------------|----------------|--------------------------|----------------|
     | System Partition | Boot Partition | Recovery Tools Partition | Data Partition |
@@ -19,7 +21,7 @@
     | -                | -              | -                        | Extend=true    |
     | Size=xxxMB       | Size=xxxMB     | Size=xxxMB               | -              |
 
-  MBR Disk Partition Table(w/o Data Partition):
+    MBR Disk Partition Table(w/o Data Partition):
     | Partition 1      | Partition 2    | Partition 3              |
     |------------------|----------------|--------------------------|
     | System Partition | Boot Partition | Recovery Tools Partition |
@@ -28,7 +30,7 @@
     | -                | -              | Extend=true              |
     | Size=xxxMB       | Size=xxxMB     | -                        |
 
-  GPT Disk Partition Table(w/ Data Partition):
+    GPT Disk Partition Table(w/ Data Partition):
     | Partition 1          | Partition 2                  | Partition 3    | Partition 4              | Partition 5    |
     |----------------------|------------------------------|----------------|--------------------------|----------------|
     | EFI System Partition | Microsoft Reserved Partition | Boot Partition | Recovery Tools Partition | Data Partition |
@@ -37,7 +39,7 @@
     | -                    | -                            | -              | -                        | Extend=true    |
     | Size=xxxMB           | Size=xxxMB                   | Size=xxxMB     | Size=xxxMB               | -              |
 
-  GPT Disk Partition Table(w/o Data Partition):
+    GPT Disk Partition Table(w/o Data Partition):
     | Partition 1          | Partition 2                  | Partition 3    | Partition 4              |
     |----------------------|------------------------------|----------------|--------------------------|
     | EFI System Partition | Microsoft Reserved Partition | Boot Partition | Recovery Tools Partition |
@@ -46,7 +48,7 @@
     | -                    | -                            | -              | Extend=true              |
     | Size=xxxMB           | Size=xxxMB                   | Size=xxxMB     | -                        |
 
-  GPT Disk Partition Table(w/ Data Partition, w/o Microsoft Reserved Partition ):
+    GPT Disk Partition Table(w/ Data Partition, w/o Microsoft Reserved Partition ):
     | Partition 1          | Partition 3    | Partition 4              | Partition 5    |
     |----------------------|----------------|--------------------------|----------------|
     | EFI System Partition | Boot Partition | Recovery Tools Partition | Data Partition |
@@ -55,7 +57,7 @@
     | -                    | -              | -                        | Extend=true    |
     | Size=xxxMB           | Size=xxxMB     | Size=xxxMB               | -              |
 
-  GPT Disk Partition Table(w/o Data Partition, w/o Microsoft Reserved Partition ):
+    GPT Disk Partition Table(w/o Data Partition, w/o Microsoft Reserved Partition ):
     | Partition 1          | Partition 3    | Partition 4              |
     |----------------------|----------------|--------------------------|
     | EFI System Partition | Boot Partition | Recovery Tools Partition |
@@ -157,17 +159,20 @@
             * "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=1]/CreatePartitions/CreatePartition[position()=$createPartitionPosition]/Order"
             * "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=1]/ModifyPartitions/ModifyPartition[position()=$modifyPartitionPosition]/Order"
             * "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=1]/ModifyPartitions/ModifyPartition[position()=$modifyPartitionPosition]/PartitionID"
-        16. 根据 $BootPartitionDiskID 和 $BootPartitionPartitionID，更新 目标应答文件中的以下内容：
+        16. 对 <CreatePartitions> 中最后一个 <CreatePartition> 的 <Size> 和 <Extend> 进行更新：
+            * 删除最后一个 <CreatePartition> 下的 <Size>
+            * 将最后一个 <CreatePartition> 下的 <Extend> 设置为 "true"
+        17. 根据 $BootPartitionDiskID 和 $BootPartitionPartitionID，更新 目标应答文件中的以下内容：
             * "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=1]/DiskID"
             * "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/ImageInstall/OSImage/InstallTo/DiskID"
             * "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/ImageInstall/OSImage/InstallTo/PartitionID"
             > 如果除了U盘外，数量 = 1 （只有 Boot Partition Disk），无脑将 DiskID 设置为 "0"
-        17. 处理 目标应答文件 中的第二块硬盘：
+        18. 处理 目标应答文件 中的第二块硬盘：
             * "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=2]"
             > 如果除了U盘外，数量 > 1
             > 1. 克隆第二块硬盘的内容
             > 2. 将所有除了 Boot Partition Disk 之外的硬盘 的DiskID 轮询地设置到 "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=$position]/DiskID"
-        18. 目标应答文件处理完成
+        19. 目标应答文件处理完成
 
 .PARAMETER <Parameter_Name>
   <Brief description of parameter input required. Repeat this attribute if required>
