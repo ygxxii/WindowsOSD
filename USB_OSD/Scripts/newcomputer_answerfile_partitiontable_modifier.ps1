@@ -82,6 +82,12 @@
             ./XXXXX.ps1 -AnswerFilePath "myAutounattend.xml"
             ```
 
+    注意 ！！！！：
+        1. 此脚本只有一个功能：修改应答文件中的内容。且仅仅是根据【当前主机】的硬盘信息修改应答文件中的以下部分：
+            * "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/"
+            * "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/ImageInstall"
+        2. 使用新生成的应答文件部署 Windows 时，目标主机上 所有硬盘（除U盘以外）的数据均会丢失
+
     脚本处理逻辑：
         1. 确定固件类型
             * 用户使用 -FirmwareType 指定固件类型 (Legacy / UEFI)
@@ -160,8 +166,8 @@
             * "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=1]/ModifyPartitions/ModifyPartition[position()=$modifyPartitionPosition]/Order"
             * "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=1]/ModifyPartitions/ModifyPartition[position()=$modifyPartitionPosition]/PartitionID"
         16. 对 <CreatePartitions> 中最后一个 <CreatePartition> 的 <Size> 和 <Extend> 进行更新：
-            * 删除最后一个 <CreatePartition> 下的 <Size>
-            * 将最后一个 <CreatePartition> 下的 <Extend> 设置为 "true"
+            * "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=1]/CreatePartitions/CreatePartition[last()]/Size"：删除
+            * "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=1]/CreatePartitions/CreatePartition[last()]/Extend"：将值设置为 "true"
         17. 根据 $BootPartitionDiskID 和 $BootPartitionPartitionID，更新 目标应答文件中的以下内容：
             * "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/DiskConfiguration/Disk[position()=1]/DiskID"
             * "/unattend/settings[@pass='windowsPE']/component[@name='Microsoft-Windows-Setup']/ImageInstall/OSImage/InstallTo/DiskID"
@@ -713,6 +719,13 @@ else {
 }
 # $IfFirmwareTypeUEFI.GetType()
 
+# Read All Disks Information
+$AllDisksExceptUSB = Get-Disk | Where-Object { $_.BusType -ne "USB" } | Sort-Object -Property Size
+Write-Host "All Disks (Except USB drive):"
+$AllDisksExceptUSB | Format-Table -Property FriendlyName, Number, BootFromDisk, BusType,  @{L='SizeInGB';E={[math]::Round($_.Size /1GB)}}
+
+Write-Host "Warning: All the data in disks above will be destroyed !!!!" -ForegroundColor Black -BackgroundColor DarkRed
+
 ## Get valid $AnswerFilePath
 # Check if Parameter AnswerFilePath is set
 if (-not ($PSBoundParameters.ContainsKey('AnswerFilePath'))) {
@@ -807,11 +820,6 @@ Write-Host "The target answer file path is:" $AnswerFileTargetPath -ForegroundCo
 $GetDiskExportCsvPath = $NewContainer + "Get_Disk.csv"
 Get-Disk | Export-Csv -Path $GetDiskExportCsvPath
 Write-Host "Get-Disk output saved:" $GetDiskExportCsvPath -ForegroundColor Green
-
-# Read All Disks Information
-$AllDisksExceptUSB = Get-Disk | Where-Object { $_.BusType -ne "USB" } | Sort-Object -Property Size
-Write-Host "All Disks (Except USB drive):"
-$AllDisksExceptUSB | Format-Table -Property FriendlyName, Number, BootFromDisk, BusType
 
 ## --------------------------------------------------
 
