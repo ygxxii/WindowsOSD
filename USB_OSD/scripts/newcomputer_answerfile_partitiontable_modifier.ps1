@@ -270,7 +270,6 @@ Param (
     [Parameter(Mandatory = $false)]
     [string]
     $DriveRootFolderName = "Windows_Installation"
-    # $DriveRootFolderName is set : do not ask user which answer file to be imported, if there is only 1 answer file is found.
 )
 
 # Write-Host "List specified script parameters:"
@@ -297,9 +296,6 @@ $DataPartitionSizeInB = $DataPartitionSizeInMB * 1024 * 1024
 $BootPartitionMinimumSizeInB = 40 * 1024 * 1024 * 1024
 # [Boot Partition Disk] minimum size
 $BootPartitionDiskMinimumSizeInB = $SystemPartitionSizeInB + $MicrosoftReservedPartitionSizeInB + $RecoveryToolsPartitionSizeInB + $DataPartitionSizeInB + $BootPartitionMinimumSizeInB
-
-# Script excuted time
-$ScriptExecutedTime = Get-Date -UFormat "%Y_%m%d_%H%M%S"
 
 # Templates:
 ## MBR [Boot Partition Disk] Partitions:
@@ -731,6 +727,11 @@ function Copy-XmlNode {
 
 #-----------------------------------------------------------[Execution]------------------------------------------------------------
 
+# Copy source Answer file to "$env:TEMP"
+$AnswerFileTargetPath = $env:TEMP + "\tempAnswerFile.xml"
+Copy-Item $AnswerFilePath -Destination $AnswerFileTargetPath > $null
+Write-Host "The target answer file path is:" $AnswerFileTargetPath -ForegroundColor Green
+
 # Check if Firemware Type is UEFI
 if ($FirmwareType -eq 'UEFI') {
     # the firmware type is UEFI
@@ -749,103 +750,7 @@ else {
 $AllDisksExceptUSB = Get-Disk | Where-Object { $_.BusType -ne "USB" } | Sort-Object -Property Size
 Write-Host "All Disks (Except USB drive):"
 $AllDisksExceptUSB | Format-Table -Property FriendlyName, Number, BootFromDisk, BusType,  @{L='SizeInGB';E={[math]::Round($_.Size /1GB)}}
-
 Write-Host "Warning: All the data in disks above will be destroyed !!!!" -ForegroundColor Black -BackgroundColor DarkRed
-
-## Get valid $AnswerFilePath
-# Check if Parameter AnswerFilePath is set
-if (-not ($PSBoundParameters.ContainsKey('AnswerFilePath'))) {
-    # The parameter "AnswerFilePath" is not set
-    # Ask user which Answer file to be import
-
-    # Get Drive Letters
-    [System.Collections.ArrayList]$DriveLetterArray = @()
-    # Get directories to check
-    [System.Collections.ArrayList]$CheckFolderArray = @()
-    $DriveLetters = @("A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z")
-    foreach ($DriveLetter in $DriveLetters) {
-        $TempPath = $DriveLetter + ":\" + $DriveRootFolderName + "\"
-        if (Test-Path $TempPath -PathType 'Container') {
-            $DriveLetterArray.Add($DriveLetter) > $null
-            $CheckFolderArray.Add($TempPath) > $null
-        }
-    }
-    # Add script root to the checking directories
-    $CheckFolderArray.Add($PSScriptRoot) > $null
-
-    # Check the directories, and get the Answer File list
-    [System.Collections.ArrayList]$AnswerFileAbsolutePathArray = @()
-    if ($IfFirmwareTypeUEFI) {
-        foreach ($TempPath in $CheckFolderArray) {
-            # The answer file must:
-            # * contain "answer"
-            # * like "*.xml"
-            # * contain "efi" or "gpt"
-            $files = Get-ChildItem $TempPath | Where-Object { $_.Name -match "answer" -and $_.Name -like "*.xml" -and ($_.Name -match "efi" -or $_.Name -match "gpt") } | Select-Object FullName
-            foreach ($file in $files) {
-                $AnswerFileAbsolutePathArray.Add($file.FullName) > $null
-            }
-        }
-    }
-    else {
-        foreach ($TempPath in $CheckFolderArray) {
-            # The answer file must:
-            # * contain "answer"
-            # * like "*.xml"
-            # * contain "bios" or "mbr"
-            $files = Get-ChildItem $TempPath | Where-Object { $_.Name -match "answer" -and $_.Name -like "*.xml" -and ($_.Name -match "bios" -or $_.Name -match "mbr") } | Select-Object FullName
-            foreach ($file in $files) {
-                $AnswerFileAbsolutePathArray.Add($file.FullName) > $null
-            }
-        }
-    }
-    # Remove duplicate items
-    $AnswerFileAbsolutePathArray = @($AnswerFileAbsolutePathArray | Select-Object -Unique)
-
-    if ($AnswerFileAbsolutePathArray.Count -eq 0) {
-        Write-Host "There is no answer file can by imported !" -ForegroundColor Green
-        Write-Host "Quit..."
-        exit
-    }
-    else {
-        Write-Host "There is one or more answer files can by imported !"
-        if ($AnswerFileAbsolutePathArray.Count -eq 1 -and $PSBoundParameters.ContainsKey('DriveRootFolderName')) {
-            $AnswerFilePath = $AnswerFileAbsolutePathArray[0]
-        }
-        else {
-            # Ask user which answer file to import
-            Write-Host "Please select an answer file by number:" -ForegroundColor Yellow
-            foreach ($AnswerFileAbsolutePath in $AnswerFileAbsolutePathArray) {
-                $index = [array]::IndexOf($AnswerFileAbsolutePathArray, $AnswerFileAbsolutePath)
-                Write-Host "    " $index "-" $AnswerFileAbsolutePath -ForegroundColor Yellow
-            }
-            [ValidateScript( { $_ -ge 0 -and $_ -lt $AnswerFileAbsolutePathArray.Count })]
-            [int]$number = Read-Host "Press the number to select an answer file"
-            Write-Host "You chose:" $AnswerFileAbsolutePathArray[$number]
-            $AnswerFilePath = $AnswerFileAbsolutePathArray[$number]
-        }
-    }
-}
-# Relative Path to Absolute Path
-$AnswerFilePath = Resolve-Path -Path $AnswerFilePath
-Write-Host "The source answer file path is:" $AnswerFilePath -ForegroundColor Green
-
-# Create Folder to contain new Answer file
-$AnswerFileBaseName = (Get-Item $AnswerFilePath).BaseName
-$AnswerFileDirectoryName = (Get-Item $AnswerFilePath).DirectoryName
-$NewContainer = $AnswerFileDirectoryName + "\" + $ScriptExecutedTime + "-" + $AnswerFileBaseName + "\"
-if (-not (Test-Path $NewContainer -PathType Container)) {
-    New-Item -ItemType directory -Path $NewContainer > $null
-}
-# Copy Answer file into new folder
-$AnswerFileTargetPath = $NewContainer + "NewAnswerFile.xml"
-Copy-Item $AnswerFilePath -Destination $AnswerFileTargetPath > $null
-Write-Host "The target answer file path is:" $AnswerFileTargetPath -ForegroundColor Green
-
-# Export Get-Disk Output
-$GetDiskExportCsvPath = $NewContainer + "Get_Disk.csv"
-Get-Disk | Export-Csv -Path $GetDiskExportCsvPath
-Write-Host "Get-Disk output saved:" $GetDiskExportCsvPath -ForegroundColor Green
 
 ## --------------------------------------------------
 
@@ -893,8 +798,6 @@ else {
     # Get $BootPartitionDiskID
     $BootPartitionDiskID = $BootPartitionDisk.Number
 }
-
-
 
 # Get [Boot Partition Disk] size
 $BootPartitionSizeInB = $BootPartitionDisk.Size - $SystemPartitionSizeInB - $MicrosoftReservedPartitionSizeInB - $RecoveryToolsPartitionSizeInB - $DataPartitionSizeInB
@@ -1105,4 +1008,4 @@ else {
     }
 }
 
-# X:\Setup.exe /unattend:"$AnswerFileTargetPath"
+# $env:SystemDrive\Setup.exe /unattend:"$AnswerFileTargetPath"
