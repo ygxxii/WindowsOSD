@@ -102,7 +102,7 @@ Get-Disk | Export-Csv -Path $ExportCsvPath
 ## 获取除U盘以外的所有硬盘信息，并按空间大小 从大到小 的顺序进行排序：
 $AllDisks = Get-Disk | Where-Object { $_.BusType -ne "USB" } | Sort-Object -Property Size
 Write-Host "AllDisks(Except USB drive):"
-$AllDisks | Format-Table  -Property FriendlyName, Number, BootFromDisk, BusType
+$AllDisks | Format-Table -Property FriendlyName, Number, BootFromDisk, BusType
 ##### <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
 
