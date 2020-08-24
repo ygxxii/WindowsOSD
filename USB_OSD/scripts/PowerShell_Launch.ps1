@@ -83,6 +83,7 @@ $AnswerFileBaseName = (Get-Item $AnswerFilePath).BaseName
 $AnswerFileDirectoryName = (Get-Item $AnswerFilePath).DirectoryName
 $NewContainer = $AnswerFileDirectoryName + "\" + $ScriptExecutedTime + "-" + $AnswerFileBaseName + "\"
 if (-not (Test-Path $NewContainer -PathType Container)) {
+    Write-Host "New Folder created:" $NewContainer
     New-Item -ItemType directory -Path $NewContainer > $null
 }
 # Export Get-Disk Output to Folder
